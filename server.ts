@@ -5,8 +5,6 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import mysql from 'mysql2/promise';
-import type { Pool, RowDataPacket } from 'mysql2/promise';
 import { createServer as createViteServer } from 'vite';
 import {
   INITIAL_PTSP_RECORDS,
@@ -48,17 +46,41 @@ interface StoreData {
 const DATA_DIR = path.join(__dirname, '.data');
 const STORE_PATH = path.join(DATA_DIR, 'ptsp_store.json');
 
-// XAMPP MySQL / MariaDB Configuration
-const MYSQL_CONFIG = {
-  host: process.env.DB_HOST || '127.0.0.1',
-  port: Number(process.env.DB_PORT || 3306),
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'db_ptsp_bawaslu_subang',
-};
+// Supabase Configuration (via REST API when SUPABASE_URL & SUPABASE_ANON_KEY are set in .env)
+const SUPABASE_URL = (
+  process.env.SUPABASE_URL ||
+  process.env.VITE_SUPABASE_URL ||
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||
+  'https://mtcfzbaelbjpmvearlmk.supabase.co'
+)
+  .trim()
+  .replace(/\/+$/, '');
 
-let mysqlPool: Pool | null = null;
-let mysqlInitAttempted = false;
+const SUPABASE_KEY = (
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  process.env.SUPABASE_KEY ||
+  process.env.VITE_SUPABASE_ANON_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  'sb_publishable_azGR9nlfXHPOYc_8tzTvog_dvmoZ9Xc'
+).trim();
+
+function isSupabaseConfigured(): boolean {
+  return Boolean(SUPABASE_URL && SUPABASE_KEY);
+}
+
+function getSupabaseHeaders(
+  extra: Record<string, string> = {}
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    apikey: SUPABASE_KEY,
+    ...extra,
+  };
+  if (SUPABASE_KEY.startsWith('eyJ')) {
+    headers.Authorization = `Bearer ${SUPABASE_KEY}`;
+  }
+  return headers;
+}
 
 function hashPassword(password: string, salt: string): string {
   return crypto.scryptSync(password, salt, 64).toString('hex');
@@ -149,210 +171,146 @@ function saveStore(data: StoreData): void {
 
 const store: StoreData = loadStore();
 
-async function upsertRecordToMySql(pool: Pool, rec: PtspRecord): Promise<void> {
+async function supabaseUpsertRecord(rec: PtspRecord): Promise<void> {
+  if (!isSupabaseConfigured()) return;
   const serviceText = rec.serviceTypes
     .map((s) => PTSP_SERVICE_TYPE_LABELS[s] || s)
     .join(', ');
-  await pool.execute(
-    `INSERT INTO ptsp_records (
-      id, registration_number, received_date, full_name, nik_or_identity,
-      institution, phone, email, service_types, purpose_summary,
-      completion_status, ptsp_officer_name, handling_unit, record_json, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON DUPLICATE KEY UPDATE
-      registration_number = VALUES(registration_number),
-      received_date = VALUES(received_date),
-      full_name = VALUES(full_name),
-      nik_or_identity = VALUES(nik_or_identity),
-      institution = VALUES(institution),
-      phone = VALUES(phone),
-      email = VALUES(email),
-      service_types = VALUES(service_types),
-      purpose_summary = VALUES(purpose_summary),
-      completion_status = VALUES(completion_status),
-      ptsp_officer_name = VALUES(ptsp_officer_name),
-      handling_unit = VALUES(handling_unit),
-      record_json = VALUES(record_json)`,
-    [
-      rec.id,
-      rec.registrationNumber,
-      rec.receivedDate || rec.dayAndDate,
-      rec.fullName,
-      rec.nikOrIdentity,
-      rec.institution || '',
-      rec.phoneWhatsapp || '',
-      rec.email || '',
-      serviceText,
-      rec.purposeSummary || '',
-      rec.completionStatus,
-      rec.ptspOfficerName || '',
-      rec.handlingUnit || '',
-      JSON.stringify(rec),
-      new Date(rec.createdAt || Date.now()),
-    ]
+  const payload = {
+    id: rec.id,
+    registration_number: rec.registrationNumber,
+    received_date: rec.receivedTime
+      ? `${rec.receivedDate || rec.dayAndDate} (${rec.receivedTime})`
+      : rec.receivedDate || rec.dayAndDate,
+    full_name: rec.fullName,
+    nik_or_identity: rec.nikOrIdentity,
+    institution: rec.institution || '',
+    phone: rec.phoneWhatsapp || '',
+    email: rec.email || '',
+    service_types: serviceText,
+    purpose_summary: rec.purposeSummary || '',
+    completion_status: rec.completionStatus,
+    ptsp_officer_name: rec.ptspOfficerName || '',
+    handling_unit: rec.handlingUnit || '',
+    record_json: rec,
+    created_at: new Date(rec.createdAt || Date.now()).toISOString(),
+  };
+
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/ptsp_records?on_conflict=id`, {
+    method: 'POST',
+    headers: getSupabaseHeaders({
+      'Content-Type': 'application/json',
+      Prefer: 'resolution=merge-duplicates,return=minimal',
+    }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error(`Supabase upsert ptsp_records failed (${res.status}): ${await res.text()}`);
+  }
+}
+
+async function supabaseFetchRecords(): Promise<PtspRecord[] | null> {
+  if (!isSupabaseConfigured()) return null;
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/ptsp_records?select=record_json&order=created_at.desc`,
+    {
+      headers: getSupabaseHeaders(),
+    }
+  );
+  if (!res.ok) {
+    throw new Error(`Supabase fetch ptsp_records failed (${res.status}): ${await res.text()}`);
+  }
+  const rows = (await res.json()) as Array<{ record_json: PtspRecord | string }>;
+  if (rows.length === 0) {
+    for (const rec of store.ptspRecords) {
+      await supabaseUpsertRecord(rec);
+    }
+    return store.ptspRecords;
+  }
+  return rows.map((r) =>
+    typeof r.record_json === 'string'
+      ? (JSON.parse(r.record_json) as PtspRecord)
+      : r.record_json
   );
 }
 
-async function insertSurveyToMySql(
-  pool: Pool,
-  survey: PtspSurveyEntry
-): Promise<void> {
-  await pool.execute(
-    `INSERT INTO ptsp_surveys (
-      id, respondent_name, survey_date, service_type, overall_satisfaction,
-      q1_prosedur, q2_persyaratan, q3_kecepatan, q4_kompetensi,
-      q5_sikap, q6_kesesuaian, q7_sarana, q8_pengaduan,
-      survey_feedback, survey_json, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON DUPLICATE KEY UPDATE
-      respondent_name = VALUES(respondent_name),
-      survey_date = VALUES(survey_date),
-      service_type = VALUES(service_type),
-      overall_satisfaction = VALUES(overall_satisfaction),
-      q1_prosedur = VALUES(q1_prosedur),
-      q2_persyaratan = VALUES(q2_persyaratan),
-      q3_kecepatan = VALUES(q3_kecepatan),
-      q4_kompetensi = VALUES(q4_kompetensi),
-      q5_sikap = VALUES(q5_sikap),
-      q6_kesesuaian = VALUES(q6_kesesuaian),
-      q7_sarana = VALUES(q7_sarana),
-      q8_pengaduan = VALUES(q8_pengaduan),
-      survey_feedback = VALUES(survey_feedback),
-      survey_json = VALUES(survey_json)`,
-    [
-      survey.id,
-      survey.respondentName,
-      survey.surveyDate,
-      survey.serviceType,
-      survey.overallSatisfaction,
-      survey.surveyScores.q1_prosedur,
-      survey.surveyScores.q2_persyaratan,
-      survey.surveyScores.q3_kecepatan,
-      survey.surveyScores.q4_kompetensi,
-      survey.surveyScores.q5_sikap,
-      survey.surveyScores.q6_kesesuaian,
-      survey.surveyScores.q7_sarana,
-      survey.surveyScores.q8_pengaduan,
-      survey.surveyFeedback || '',
-      JSON.stringify(survey),
-      new Date(survey.createdAt || Date.now()),
-    ]
+async function supabaseUpsertSurvey(survey: PtspSurveyEntry): Promise<void> {
+  if (!isSupabaseConfigured()) return;
+  const payload = {
+    id: survey.id,
+    respondent_name: survey.respondentName,
+    survey_date: survey.surveyDate,
+    service_type: survey.serviceType,
+    overall_satisfaction: survey.overallSatisfaction,
+    q1_prosedur: survey.surveyScores.q1_prosedur,
+    q2_persyaratan: survey.surveyScores.q2_persyaratan,
+    q3_kecepatan: survey.surveyScores.q3_kecepatan,
+    q4_kompetensi: survey.surveyScores.q4_kompetensi,
+    q5_sikap: survey.surveyScores.q5_sikap,
+    q6_kesesuaian: survey.surveyScores.q6_kesesuaian,
+    q7_sarana: survey.surveyScores.q7_sarana,
+    q8_pengaduan: survey.surveyScores.q8_pengaduan,
+    survey_feedback: survey.surveyFeedback || '',
+    survey_json: survey,
+    created_at: new Date(survey.createdAt || Date.now()).toISOString(),
+  };
+
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/ptsp_surveys?on_conflict=id`, {
+    method: 'POST',
+    headers: getSupabaseHeaders({
+      'Content-Type': 'application/json',
+      Prefer: 'resolution=merge-duplicates,return=minimal',
+    }),
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error(`Supabase upsert ptsp_surveys failed (${res.status}): ${await res.text()}`);
+  }
+}
+
+async function supabaseFetchSurveys(): Promise<PtspSurveyEntry[] | null> {
+  if (!isSupabaseConfigured()) return null;
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/ptsp_surveys?select=survey_json&order=created_at.desc`,
+    {
+      headers: getSupabaseHeaders(),
+    }
+  );
+  if (!res.ok) {
+    throw new Error(`Supabase fetch ptsp_surveys failed (${res.status}): ${await res.text()}`);
+  }
+  const rows = (await res.json()) as Array<{ survey_json: PtspSurveyEntry | string }>;
+  if (rows.length === 0) {
+    for (const srv of store.ptspSurveys) {
+      await supabaseUpsertSurvey(srv);
+    }
+    return store.ptspSurveys;
+  }
+  return rows.map((r) =>
+    typeof r.survey_json === 'string'
+      ? (JSON.parse(r.survey_json) as PtspSurveyEntry)
+      : r.survey_json
   );
 }
 
-async function initXamppMySql(): Promise<Pool | null> {
-  if (mysqlPool) return mysqlPool;
-  if (mysqlInitAttempted) return null;
-  mysqlInitAttempted = true;
+async function initSupabase(): Promise<void> {
+  if (!isSupabaseConfigured()) return;
   try {
-    // 1. Connect to XAMPP MySQL server to ensure database exists
-    const bootstrapConn = await mysql.createConnection({
-      host: MYSQL_CONFIG.host,
-      port: MYSQL_CONFIG.port,
-      user: MYSQL_CONFIG.user,
-      password: MYSQL_CONFIG.password,
-      connectTimeout: 1000,
-    });
-
-    await bootstrapConn.query(
-      `CREATE DATABASE IF NOT EXISTS \`${MYSQL_CONFIG.database}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
-    );
-    await bootstrapConn.end();
-
-    // 2. Create connection pool to the PTSP database
-    const pool = mysql.createPool({
-      host: MYSQL_CONFIG.host,
-      port: MYSQL_CONFIG.port,
-      user: MYSQL_CONFIG.user,
-      password: MYSQL_CONFIG.password,
-      database: MYSQL_CONFIG.database,
-      waitForConnections: true,
-      connectionLimit: 10,
-    });
-
-    // 3. Ensure tables exist
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS ptsp_records (
-        id VARCHAR(64) NOT NULL PRIMARY KEY,
-        registration_number VARCHAR(100) NOT NULL,
-        received_date VARCHAR(50) NOT NULL,
-        full_name VARCHAR(150) NOT NULL,
-        nik_or_identity VARCHAR(64) NOT NULL,
-        institution VARCHAR(150) DEFAULT '',
-        phone VARCHAR(50) DEFAULT '',
-        email VARCHAR(120) DEFAULT '',
-        service_types TEXT NOT NULL,
-        purpose_summary TEXT NOT NULL,
-        completion_status VARCHAR(64) NOT NULL DEFAULT 'menunggu_verifikasi',
-        ptsp_officer_name VARCHAR(150) DEFAULT '',
-        handling_unit VARCHAR(150) DEFAULT '',
-        record_json LONGTEXT NOT NULL,
-        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS ptsp_surveys (
-        id VARCHAR(64) NOT NULL PRIMARY KEY,
-        respondent_name VARCHAR(150) NOT NULL,
-        survey_date VARCHAR(50) NOT NULL,
-        service_type VARCHAR(80) NOT NULL,
-        overall_satisfaction VARCHAR(40) NOT NULL,
-        q1_prosedur TINYINT NOT NULL DEFAULT 4,
-        q2_persyaratan TINYINT NOT NULL DEFAULT 4,
-        q3_kecepatan TINYINT NOT NULL DEFAULT 4,
-        q4_kompetensi TINYINT NOT NULL DEFAULT 4,
-        q5_sikap TINYINT NOT NULL DEFAULT 4,
-        q6_kesesuaian TINYINT NOT NULL DEFAULT 4,
-        q7_sarana TINYINT NOT NULL DEFAULT 4,
-        q8_pengaduan TINYINT NOT NULL DEFAULT 4,
-        survey_feedback TEXT,
-        survey_json LONGTEXT NOT NULL,
-        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-    `);
-
-    // 4. Sync / Load records from MySQL
-    const [recRows] = await pool.query<RowDataPacket[]>(
-      'SELECT record_json FROM ptsp_records ORDER BY created_at DESC'
-    );
-    if (recRows.length === 0) {
-      for (const rec of store.ptspRecords) {
-        await upsertRecordToMySql(pool, rec);
-      }
-    } else {
-      store.ptspRecords = recRows.map(
-        (r) => JSON.parse(String(r.record_json)) as PtspRecord
-      );
-    }
-
-    // 5. Sync / Load surveys from MySQL
-    const [srvRows] = await pool.query<RowDataPacket[]>(
-      'SELECT survey_json FROM ptsp_surveys ORDER BY created_at DESC'
-    );
-    if (srvRows.length === 0) {
-      for (const srv of store.ptspSurveys) {
-        await insertSurveyToMySql(pool, srv);
-      }
-    } else {
-      store.ptspSurveys = srvRows.map(
-        (r) => JSON.parse(String(r.survey_json)) as PtspSurveyEntry
-      );
-    }
-
-    mysqlPool = pool;
+    const [records, surveys] = await Promise.all([
+      supabaseFetchRecords(),
+      supabaseFetchSurveys(),
+    ]);
+    if (records) store.ptspRecords = records;
+    if (surveys) store.ptspSurveys = surveys;
     saveStore(store);
     console.log(
-      `[XAMPP MySQL] Terhubung ke database '${MYSQL_CONFIG.database}' di ${MYSQL_CONFIG.host}:${MYSQL_CONFIG.port}`
+      `[Supabase Cloud] Terhubung ke ${SUPABASE_URL} (${store.ptspRecords.length} berkas PTSP, ${store.ptspSurveys.length} survei SKM tersinkronisasi).`
     );
-    return mysqlPool;
   } catch (err) {
-    mysqlPool = null;
-    console.log(
-      `[Penyimpanan Lokal] XAMPP MySQL (${MYSQL_CONFIG.host}:${MYSQL_CONFIG.port}) belum terhubung (${(err as Error)?.message || 'offline'}) — menggunakan penyimpanan lokal (.data/ptsp_store.json).`
+    console.error(
+      `[Supabase Cloud] Gagal menyinkronkan tabel Supabase (pastikan supabase_schema.sql sudah dijalankan di SQL Editor Supabase):`,
+      (err as Error)?.message || err
     );
-    return null;
   }
 }
 
@@ -420,19 +378,11 @@ function requireOfficerAuth(
   next();
 }
 
-function sqlEscape(val: string): string {
-  return `'${String(val ?? '')
-    .replace(/\\/g, '\\\\')
-    .replace(/'/g, "\\'")
-    .replace(/\r/g, '\\r')
-    .replace(/\n/g, '\\n')}'`;
-}
-
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  void initXamppMySql();
+  void initSupabase();
 
   app.use(express.json({ limit: '5mb' }));
 
@@ -610,25 +560,23 @@ async function startServer() {
     }
   );
 
-  // --- PTSP RECORDS & SURVEYS API ROUTES (XAMPP MYSQL + LOCAL FALLBACK) ---
+  // --- PTSP RECORDS & SURVEYS API ROUTES (SUPABASE CLOUD -> LOCAL JSON FALLBACK) ---
 
   app.get('/api/ptsp/records', async (_req: Request, res: Response) => {
-    const pool = mysqlPool || (await initXamppMySql());
-    if (pool) {
+    if (isSupabaseConfigured()) {
       try {
-        const [rows] = await pool.query<RowDataPacket[]>(
-          'SELECT record_json FROM ptsp_records ORDER BY created_at DESC'
-        );
-        const records = rows.map(
-          (r) => JSON.parse(String(r.record_json)) as PtspRecord
-        );
-        store.ptspRecords = records;
-        res.json({ records, storage: 'xampp_mysql' });
-        return;
+        const records = await supabaseFetchRecords();
+        if (records) {
+          store.ptspRecords = records;
+          saveStore(store);
+          res.json({ records, storage: 'supabase' });
+          return;
+        }
       } catch (err) {
-        console.error('MySQL read records error:', err);
+        console.error('Supabase read records error:', err);
       }
     }
+
     res.json({ records: store.ptspRecords, storage: 'local_json' });
   });
 
@@ -645,12 +593,11 @@ async function startServer() {
     ];
     saveStore(store);
 
-    const pool = mysqlPool || (await initXamppMySql());
-    if (pool) {
+    if (isSupabaseConfigured()) {
       try {
-        await upsertRecordToMySql(pool, incoming);
+        await supabaseUpsertRecord(incoming);
       } catch (err) {
-        console.error('MySQL insert record error:', err);
+        console.error('Supabase insert record error:', err);
       }
     }
 
@@ -673,12 +620,11 @@ async function startServer() {
     }
     saveStore(store);
 
-    const pool = mysqlPool || (await initXamppMySql());
-    if (pool) {
+    if (isSupabaseConfigured()) {
       try {
-        await upsertRecordToMySql(pool, updated);
+        await supabaseUpsertRecord(updated);
       } catch (err) {
-        console.error('MySQL update record error:', err);
+        console.error('Supabase update record error:', err);
       }
     }
 
@@ -686,22 +632,20 @@ async function startServer() {
   });
 
   app.get('/api/ptsp/surveys', async (_req: Request, res: Response) => {
-    const pool = mysqlPool || (await initXamppMySql());
-    if (pool) {
+    if (isSupabaseConfigured()) {
       try {
-        const [rows] = await pool.query<RowDataPacket[]>(
-          'SELECT survey_json FROM ptsp_surveys ORDER BY created_at DESC'
-        );
-        const surveys = rows.map(
-          (r) => JSON.parse(String(r.survey_json)) as PtspSurveyEntry
-        );
-        store.ptspSurveys = surveys;
-        res.json({ surveys, storage: 'xampp_mysql' });
-        return;
+        const surveys = await supabaseFetchSurveys();
+        if (surveys) {
+          store.ptspSurveys = surveys;
+          saveStore(store);
+          res.json({ surveys, storage: 'supabase' });
+          return;
+        }
       } catch (err) {
-        console.error('MySQL read surveys error:', err);
+        console.error('Supabase read surveys error:', err);
       }
     }
+
     res.json({ surveys: store.ptspSurveys, storage: 'local_json' });
   });
 
@@ -718,122 +662,15 @@ async function startServer() {
     ];
     saveStore(store);
 
-    const pool = mysqlPool || (await initXamppMySql());
-    if (pool) {
+    if (isSupabaseConfigured()) {
       try {
-        await insertSurveyToMySql(pool, incoming);
+        await supabaseUpsertSurvey(incoming);
       } catch (err) {
-        console.error('MySQL insert survey error:', err);
+        console.error('Supabase insert survey error:', err);
       }
     }
 
     res.status(201).json({ survey: incoming });
-  });
-
-  // Export live SQL dump for direct import into XAMPP phpMyAdmin
-  app.get('/api/ptsp/export-sql', (_req: Request, res: Response) => {
-    const lines: string[] = [
-      '-- ============================================================================',
-      '-- DUMP SQL DATABASE PTSP BAWASLU KABUPATEN SUBANG (UNTUK XAMPP / phpMyAdmin)',
-      `-- Waktu Ekspor: ${new Date().toISOString()}`,
-      '-- ============================================================================',
-      '',
-      'CREATE DATABASE IF NOT EXISTS `db_ptsp_bawaslu_subang` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;',
-      'USE `db_ptsp_bawaslu_subang`;',
-      '',
-      'CREATE TABLE IF NOT EXISTS `ptsp_records` (',
-      '  `id` VARCHAR(64) NOT NULL PRIMARY KEY,',
-      '  `registration_number` VARCHAR(100) NOT NULL,',
-      '  `received_date` VARCHAR(50) NOT NULL,',
-      '  `full_name` VARCHAR(150) NOT NULL,',
-      '  `nik_or_identity` VARCHAR(64) NOT NULL,',
-      '  `institution` VARCHAR(150) DEFAULT \'\',',
-      '  `phone` VARCHAR(50) DEFAULT \'\',',
-      '  `email` VARCHAR(120) DEFAULT \'\',',
-      '  `service_types` TEXT NOT NULL,',
-      '  `purpose_summary` TEXT NOT NULL,',
-      '  `completion_status` VARCHAR(64) NOT NULL DEFAULT \'menunggu_verifikasi\',',
-      '  `ptsp_officer_name` VARCHAR(150) DEFAULT \'\',',
-      '  `handling_unit` VARCHAR(150) DEFAULT \'\',',
-      '  `record_json` LONGTEXT NOT NULL,',
-      '  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,',
-      '  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
-      ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;',
-      '',
-      'CREATE TABLE IF NOT EXISTS `ptsp_surveys` (',
-      '  `id` VARCHAR(64) NOT NULL PRIMARY KEY,',
-      '  `respondent_name` VARCHAR(150) NOT NULL,',
-      '  `survey_date` VARCHAR(50) NOT NULL,',
-      '  `service_type` VARCHAR(80) NOT NULL,',
-      '  `overall_satisfaction` VARCHAR(40) NOT NULL,',
-      '  `q1_prosedur` TINYINT NOT NULL DEFAULT 4,',
-      '  `q2_persyaratan` TINYINT NOT NULL DEFAULT 4,',
-      '  `q3_kecepatan` TINYINT NOT NULL DEFAULT 4,',
-      '  `q4_kompetensi` TINYINT NOT NULL DEFAULT 4,',
-      '  `q5_sikap` TINYINT NOT NULL DEFAULT 4,',
-      '  `q6_kesesuaian` TINYINT NOT NULL DEFAULT 4,',
-      '  `q7_sarana` TINYINT NOT NULL DEFAULT 4,',
-      '  `q8_pengaduan` TINYINT NOT NULL DEFAULT 4,',
-      '  `survey_feedback` TEXT,',
-      '  `survey_json` LONGTEXT NOT NULL,',
-      '  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP',
-      ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;',
-      '',
-    ];
-
-    for (const rec of store.ptspRecords) {
-      const serviceText = rec.serviceTypes
-        .map((s) => PTSP_SERVICE_TYPE_LABELS[s] || s)
-        .join(', ');
-      lines.push(
-        `REPLACE INTO \`ptsp_records\` (\`id\`, \`registration_number\`, \`received_date\`, \`full_name\`, \`nik_or_identity\`, \`institution\`, \`phone\`, \`email\`, \`service_types\`, \`purpose_summary\`, \`completion_status\`, \`ptsp_officer_name\`, \`handling_unit\`, \`record_json\`) VALUES (${sqlEscape(
-          rec.id
-        )}, ${sqlEscape(rec.registrationNumber)}, ${sqlEscape(
-          rec.receivedDate || rec.dayAndDate
-        )}, ${sqlEscape(rec.fullName)}, ${sqlEscape(
-          rec.nikOrIdentity
-        )}, ${sqlEscape(rec.institution)}, ${sqlEscape(rec.phoneWhatsapp)}, ${sqlEscape(
-          rec.email
-        )}, ${sqlEscape(serviceText)}, ${sqlEscape(
-          rec.purposeSummary
-        )}, ${sqlEscape(rec.completionStatus)}, ${sqlEscape(
-          rec.ptspOfficerName
-        )}, ${sqlEscape(rec.handlingUnit)}, ${sqlEscape(
-          JSON.stringify(rec)
-        )});`
-      );
-    }
-
-    lines.push('');
-
-    for (const srv of store.ptspSurveys) {
-      lines.push(
-        `REPLACE INTO \`ptsp_surveys\` (\`id\`, \`respondent_name\`, \`survey_date\`, \`service_type\`, \`overall_satisfaction\`, \`q1_prosedur\`, \`q2_persyaratan\`, \`q3_kecepatan\`, \`q4_kompetensi\`, \`q5_sikap\`, \`q6_kesesuaian\`, \`q7_sarana\`, \`q8_pengaduan\`, \`survey_feedback\`, \`survey_json\`) VALUES (${sqlEscape(
-          srv.id
-        )}, ${sqlEscape(srv.respondentName)}, ${sqlEscape(
-          srv.surveyDate
-        )}, ${sqlEscape(srv.serviceType)}, ${sqlEscape(
-          srv.overallSatisfaction
-        )}, ${Number(srv.surveyScores.q1_prosedur)}, ${Number(
-          srv.surveyScores.q2_persyaratan
-        )}, ${Number(srv.surveyScores.q3_kecepatan)}, ${Number(
-          srv.surveyScores.q4_kompetensi
-        )}, ${Number(srv.surveyScores.q5_sikap)}, ${Number(
-          srv.surveyScores.q6_kesesuaian
-        )}, ${Number(srv.surveyScores.q7_sarana)}, ${Number(
-          srv.surveyScores.q8_pengaduan
-        )}, ${sqlEscape(srv.surveyFeedback)}, ${sqlEscape(
-          JSON.stringify(srv)
-        )});`
-      );
-    }
-
-    res.setHeader('Content-Type', 'application/sql; charset=utf-8');
-    res.setHeader(
-      'Content-Disposition',
-      'attachment; filename="db_ptsp_bawaslu_subang_xampp.sql"'
-    );
-    res.send(lines.join('\n'));
   });
 
   // Vite middleware for development vs static serving for production
@@ -861,7 +698,10 @@ async function startServer() {
         `Server PTSP Bawaslu Kabupaten Subang berhasil berjalan!`
       );
       console.log(
-        `Buka di Browser Anda: http://localhost:${portToTry}`
+        `Link Khusus Pemohon : http://localhost:${portToTry}/pelayanan`
+      );
+      console.log(
+        `Link Khusus Petugas : http://localhost:${portToTry}/petugas`
       );
       console.log(
         `==================================================================\n`

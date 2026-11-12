@@ -26,6 +26,7 @@ import {
   Award,
   BarChart3,
   MessageSquareQuote,
+  Loader2,
 } from 'lucide-react';
 
 export type OfficerWorkspaceTab = 'dashboard' | 'ptsp_desk';
@@ -274,6 +275,7 @@ export const OfficerDeskPanel: React.FC<OfficerDeskPanelProps> = ({
           <button
             type="button"
             onClick={() => {
+              onChangeSelectedPtspRecordId?.('');
               onChangeOfficerPtspFormCode?.('formulir_2');
               setActiveSubTab('ptsp_desk');
             }}
@@ -289,6 +291,7 @@ export const OfficerDeskPanel: React.FC<OfficerDeskPanelProps> = ({
           <button
             type="button"
             onClick={() => {
+              onChangeSelectedPtspRecordId?.('');
               onChangeOfficerPtspFormCode?.('formulir_3');
               setActiveSubTab('ptsp_desk');
             }}
@@ -304,6 +307,7 @@ export const OfficerDeskPanel: React.FC<OfficerDeskPanelProps> = ({
           <button
             type="button"
             onClick={() => {
+              onChangeSelectedPtspRecordId?.('');
               onChangeOfficerPtspFormCode?.('formulir_4');
               setActiveSubTab('ptsp_desk');
             }}
@@ -802,6 +806,7 @@ export const OfficerDeskPanel: React.FC<OfficerDeskPanelProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      onChangeSelectedPtspRecordId?.('');
                       onChangeOfficerPtspFormCode?.('formulir_2');
                       setActiveSubTab('ptsp_desk');
                     }}
@@ -845,6 +850,7 @@ export const OfficerDeskPanel: React.FC<OfficerDeskPanelProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      onChangeSelectedPtspRecordId?.('');
                       onChangeOfficerPtspFormCode?.('formulir_2');
                       setActiveSubTab('ptsp_desk');
                     }}
@@ -912,7 +918,19 @@ export const OfficerDeskPanel: React.FC<OfficerDeskPanelProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+                    <div className="flex flex-wrap items-center gap-2 shrink-0 self-start sm:self-center">
+                      {onInspectPrintRecord && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onInspectPrintRecord(rec, 'formulir_1')
+                          }
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-stone-100 hover:bg-stone-200 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-slate-600" />
+                          <span>Lihat &amp; Cetak</span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => {
@@ -920,7 +938,7 @@ export const OfficerDeskPanel: React.FC<OfficerDeskPanelProps> = ({
                           onChangeOfficerPtspFormCode?.('formulir_2');
                           setActiveSubTab('ptsp_desk');
                         }}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors whitespace-nowrap"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
                       >
                         <ClipboardCheck className="w-3.5 h-3.5 text-red-800" />
                         <span>Verifikasi &amp; Monitoring</span>
@@ -1038,11 +1056,16 @@ export const OfficerDeskPanel: React.FC<OfficerDeskPanelProps> = ({
                 <button
                   type="submit"
                   disabled={isChangingPassword}
-                  className="px-4 py-2 text-xs font-semibold text-white bg-red-800 hover:bg-red-900 disabled:opacity-60 rounded-lg"
+                  className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-red-800 hover:bg-red-900 disabled:opacity-70 rounded-lg cursor-pointer"
                 >
-                  {isChangingPassword
-                    ? 'Memperbarui...'
-                    : 'Simpan Kata Sandi Baru'}
+                  {isChangingPassword ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 text-amber-300 animate-spin" />
+                      <span>Memperbarui...</span>
+                    </>
+                  ) : (
+                    <span>Simpan Kata Sandi Baru</span>
+                  )}
                 </button>
               </div>
             </form>

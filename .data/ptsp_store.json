@@ -1,0 +1,367 @@
+{
+  "officers": [
+    {
+      "id": "off-1",
+      "username": "petugas",
+      "nipNik": "19910412 201902 2 004",
+      "fullName": "Rina Kartika, S.I.P.",
+      "roleTitle": "Petugas Penerima Layanan PTSP Bawaslu Kabupaten Subang",
+      "accessLevel": "petugas_penerima",
+      "salt": "683b56f92626312b32d88e00901c0f2f",
+      "passwordHash": "96038bbe6db730dbd5ff19f8f3e45cec344969eca1ead5c5146c457c3525f1f922a435196c75ccad48d1e3779eef8c676b5654701f2626f1b66633278ad23c91"
+    },
+    {
+      "id": "off-2",
+      "username": "ketua",
+      "nipNik": "19840817 201101 1 002",
+      "fullName": "H. Imanudin, S.H., M.H.",
+      "roleTitle": "Koordinator Sekretariat / Penanggung Jawab PTSP",
+      "accessLevel": "ketua_pelaksana",
+      "salt": "979e56b6a92120e55c667b08999ab5dd",
+      "passwordHash": "c97f736474a560ca17a21c45f77c44d2e1f483156716d33004d7ec2fe4c97e776927b2ede95f3b5cc9d077ac463eaf75abdf37a22190421f1c901b7b33d96f44"
+    }
+  ],
+  "ptspRecords": [
+    {
+      "id": "PTSP-2026-004",
+      "createdAt": "2026-11-07T13:30:00+07:00",
+      "registrationNumber": "004/PTSP/686138/XI/2026",
+      "dayAndDate": "Sabtu, 7 November 2026",
+      "fullName": "Rizky Pratama Putra",
+      "nikOrIdentity": "3213120511990003",
+      "institution": "Forum Warga Peduli Pemilu Pamanukan",
+      "position": "Koordinator Lapangan",
+      "address": "Dusun Krajan RT 003/RW 001, Desa Pamanukan, Kec. Pamanukan, Kabupaten Subang",
+      "phoneWhatsapp": "0821-1122-3344",
+      "email": "rizky.pamanukan@gmail.com",
+      "serviceTypes": [
+        "informasi_penanganan_pelanggaran",
+        "aspirasi_saran_masukan"
+      ],
+      "serviceOtherText": "",
+      "purposeSummary": "Permohonan informasi tata cara penyampaian laporan dugaan pelanggaran serta penyampaian saran pengawasan di wilayah Kecamatan Pamanukan.",
+      "supportingDocTypes": [
+        "fotokopi_identitas",
+        "dokumen_pendukung",
+        "bukti_dokumentasi"
+      ],
+      "supportingDocOtherText": "",
+      "receivedDate": "7 November 2026",
+      "receivedTime": "13.40 WIB",
+      "ptspOfficerName": "Rina Kartika, S.I.P.",
+      "verificationChecks": [
+        "identitas_diperiksa",
+        "formulir_diisi",
+        "dokumen_tersedia",
+        "substansi_diidentifikasi",
+        "diteruskan_unit_terkait"
+      ],
+      "verificationNotes": "Telah diverifikasi lengkap dan diteruskan ke Divisi Penanganan Pelanggaran dan Data/Informasi.",
+      "dispositionTargets": [
+        "divisi_pp_datin"
+      ],
+      "dispositionOtherText": "",
+      "dispositionNotes": "Berikan layanan informasi alur penanganan pelanggaran sesuai Perbawaslu.",
+      "dispositionReceiverName": "Staf Divisi PP dan Datin",
+      "initialStatus": "diteruskan_unit_terkait",
+      "receiptRemarks": "Layanan informasi telah diberikan pada hari yang sama.",
+      "receiptDateText": "7 November 2026",
+      "handlingUnit": "Divisi Penanganan Pelanggaran dan Data/Informasi",
+      "forwardedDate": "7 November 2026",
+      "personInCharge": "Koordinator Divisi PP dan Datin",
+      "completionDate": "7 November 2026",
+      "completionStatus": "selesai",
+      "followUpResult": "Pemohon telah memperoleh penjelasan lengkap mengenai syarat formil dan materiil laporan dugaan pelanggaran Pemilu.",
+      "notesToApplicant": "Terima kasih atas partisipasi pengawasan masyarakat.",
+      "unitOfficerName": "Staf Teknis Divisi PP dan Datin",
+      "surveyDate": "7 November 2026",
+      "surveyScores": {
+        "q1_prosedur": 4,
+        "q2_persyaratan": 4,
+        "q3_kecepatan": 4,
+        "q4_kompetensi": 4,
+        "q5_sikap": 4,
+        "q6_kesesuaian": 4,
+        "q7_sarana": 4,
+        "q8_pengaduan": 4
+      },
+      "surveyFeedback": "Sangat terbantu dengan penjelasan petugas PTSP.",
+      "overallSatisfaction": "sangat_puas"
+    },
+    {
+      "id": "PTSP-2026-003",
+      "createdAt": "2026-11-06T08:45:00+07:00",
+      "registrationNumber": "003/PTSP/686138/XI/2026",
+      "dayAndDate": "Jumat, 6 November 2026",
+      "fullName": "Drs. Bambang Suryono, M.Si.",
+      "nikOrIdentity": "3213071904710001",
+      "institution": "Fakultas Ilmu Sosial & Ilmu Politik Universitas Subang",
+      "position": "Dosen & Peneliti Kepemiluan",
+      "address": "Jl. R.A. Kartini KM 3, Desa Nyimplung, Kec. Pasirkareumbi, Kabupaten Subang",
+      "phoneWhatsapp": "0813-9876-5432",
+      "email": "bambang.suryono@unsub.ac.id",
+      "serviceTypes": [
+        "permohonan_audiensi",
+        "permohonan_data_dokumen"
+      ],
+      "serviceOtherText": "",
+      "purposeSummary": "Permohonan audiensi akademik dan permintaan narasumber terkait pengawasan partisipatif mahasiswa pada Pemilihan Umum.",
+      "supportingDocTypes": [
+        "fotokopi_identitas",
+        "surat_permohonan_resmi"
+      ],
+      "supportingDocOtherText": "",
+      "receivedDate": "6 November 2026",
+      "receivedTime": "08.50 WIB",
+      "ptspOfficerName": "Rina Kartika, S.I.P.",
+      "verificationChecks": [
+        "identitas_diperiksa",
+        "formulir_diisi"
+      ],
+      "verificationNotes": "Berkas baru diterima di meja PTSP dan menunggu disposisi pimpinan.",
+      "dispositionTargets": [
+        "ketua_bawaslu",
+        "divisi_pencegahan_parmas_humas"
+      ],
+      "dispositionOtherText": "",
+      "dispositionNotes": "",
+      "dispositionReceiverName": "",
+      "initialStatus": "diterima",
+      "receiptRemarks": "Menunggu jadwal audiensi dari pimpinan Bawaslu Kabupaten Subang.",
+      "receiptDateText": "6 November 2026",
+      "handlingUnit": "Divisi Pencegahan, Parmas, dan Humas",
+      "forwardedDate": "6 November 2026",
+      "personInCharge": "Koordinator Divisi Pencegahan, Parmas, dan Humas",
+      "completionDate": "-",
+      "completionStatus": "menunggu_verifikasi",
+      "followUpResult": "",
+      "notesToApplicant": "",
+      "unitOfficerName": "",
+      "surveyDate": "6 November 2026",
+      "surveyScores": {
+        "q1_prosedur": 4,
+        "q2_persyaratan": 4,
+        "q3_kecepatan": 4,
+        "q4_kompetensi": 4,
+        "q5_sikap": 4,
+        "q6_kesesuaian": 4,
+        "q7_sarana": 4,
+        "q8_pengaduan": 4
+      },
+      "surveyFeedback": "Pendaftaran melalui PTSP mudah dipahami.",
+      "overallSatisfaction": "sangat_puas"
+    },
+    {
+      "id": "PTSP-2026-002",
+      "createdAt": "2026-11-04T10:20:00+07:00",
+      "registrationNumber": "002/PTSP/686138/XI/2026",
+      "dayAndDate": "Rabu, 4 November 2026",
+      "fullName": "Nadia Putri Lestari, S.I.Kom.",
+      "nikOrIdentity": "3213014809960004",
+      "institution": "Jaringan Pemantau Demokrasi Subang",
+      "position": "Koordinator Riset & Data",
+      "address": "Jl. Darmodiharjo No. 18, Kel. Sukamelang, Kec. Subang, Kabupaten Subang",
+      "phoneWhatsapp": "0857-2233-4455",
+      "email": "nadia.lestari@jpds-subang.or.id",
+      "serviceTypes": [
+        "ppid",
+        "permohonan_data_dokumen"
+      ],
+      "serviceOtherText": "",
+      "purposeSummary": "Permohonan informasi publik dan salinan data rekapitulasi kegiatan pencegahan serta sosialisasi pengawasan partisipatif tahun berjalan.",
+      "supportingDocTypes": [
+        "fotokopi_identitas",
+        "surat_permohonan_resmi"
+      ],
+      "supportingDocOtherText": "",
+      "receivedDate": "4 November 2026",
+      "receivedTime": "10.30 WIB",
+      "ptspOfficerName": "Rina Kartika, S.I.P.",
+      "verificationChecks": [
+        "identitas_diperiksa",
+        "formulir_diisi",
+        "dokumen_tersedia",
+        "substansi_diidentifikasi",
+        "diteruskan_unit_terkait"
+      ],
+      "verificationNotes": "Identitas pemohon dan surat permohonan resmi organisasi telah diverifikasi.",
+      "dispositionTargets": [
+        "ppid_bawaslu",
+        "divisi_pencegahan_parmas_humas"
+      ],
+      "dispositionOtherText": "",
+      "dispositionNotes": "Mohon PPID bersama Divisi Pencegahan, Parmas, dan Humas menyiapkan dokumen informasi yang dimohonkan sesuai ketentuan Perbawaslu PPID.",
+      "dispositionReceiverName": "Petugas Layanan PPID",
+      "initialStatus": "diterima",
+      "receiptRemarks": "Permohonan sedang dikoordinasikan bersama Pejabat Pengelola Informasi dan Dokumentasi (PPID).",
+      "receiptDateText": "4 November 2026",
+      "handlingUnit": "PPID Bawaslu Kabupaten Subang",
+      "forwardedDate": "4 November 2026",
+      "personInCharge": "Koordinator PPID Bawaslu Kabupaten Subang",
+      "completionDate": "-",
+      "completionStatus": "selesai",
+      "followUpResult": "Sedang dalam tahap penyiapan salinan dokumen informasi publik yang dimohonkan.",
+      "notesToApplicant": "Pemberitahuan tertulis akan disampaikan sesuai jangka waktu pelayanan informasi publik.",
+      "unitOfficerName": "Staf Pelaksana PPID",
+      "surveyDate": "4 November 2026",
+      "surveyScores": {
+        "q1_prosedur": 4,
+        "q2_persyaratan": 4,
+        "q3_kecepatan": 3,
+        "q4_kompetensi": 4,
+        "q5_sikap": 4,
+        "q6_kesesuaian": 4,
+        "q7_sarana": 4,
+        "q8_pengaduan": 4
+      },
+      "surveyFeedback": "Alur penerimaan di meja PTSP sangat jelas dan petugas ramah.",
+      "overallSatisfaction": "puas",
+      "ptspOfficerSignature": "data:image/png;base64,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"
+    },
+    {
+      "id": "PTSP-2026-001",
+      "createdAt": "2026-11-02T09:00:00+07:00",
+      "registrationNumber": "001/PTSP/686138/XI/2026",
+      "dayAndDate": "Senin, 2 November 2026",
+      "fullName": "H. Dedi Kurniawan, S.H.",
+      "nikOrIdentity": "3213031405780002",
+      "institution": "DPD Partai Persatuan Demokrasi Kabupaten Subang",
+      "position": "Wakil Ketua Bidang Hukum & Advokasi",
+      "address": "Jl. Otto Iskandardinata No. 114, Kel. Karanganyar, Kec. Subang, Kabupaten Subang",
+      "phoneWhatsapp": "0812-2345-6789",
+      "email": "hukum.dpdsubang@parpol.or.id",
+      "serviceTypes": [
+        "konsultasi_kepemiluan",
+        "informasi_penyelesaian_sengketa"
+      ],
+      "serviceOtherText": "",
+      "purposeSummary": "Permohonan konsultasi kepemiluan dan informasi prosedur penyelesaian sengketa proses Pemilu terkait tahapan pemutakhiran data partai politik berkelanjutan.",
+      "supportingDocTypes": [
+        "fotokopi_identitas",
+        "surat_permohonan_resmi",
+        "dokumen_pendukung"
+      ],
+      "supportingDocOtherText": "",
+      "receivedDate": "2 November 2026",
+      "receivedTime": "09.15 WIB",
+      "ptspOfficerName": "Rina Kartika, S.I.P.",
+      "verificationChecks": [
+        "identitas_diperiksa",
+        "formulir_diisi",
+        "dokumen_tersedia",
+        "substansi_diidentifikasi",
+        "diteruskan_unit_terkait"
+      ],
+      "verificationNotes": "Berkas permohonan lengkap beserta surat tugas instansi dan fotokopi KTP-el.",
+      "dispositionTargets": [
+        "divisi_hukum_sengketa"
+      ],
+      "dispositionOtherText": "",
+      "dispositionNotes": "Diteruskan ke Divisi Hukum dan Penyelesaian Sengketa untuk fasilitasi konsultasi.",
+      "dispositionReceiverName": "H. Imanudin, S.H., M.H.",
+      "initialStatus": "diteruskan_unit_terkait",
+      "receiptRemarks": "Berkas telah diterima lengkap dan diteruskan kepada Divisi Hukum dan Penyelesaian Sengketa.",
+      "receiptDateText": "2 November 2026",
+      "handlingUnit": "Divisi Hukum dan Penyelesaian Sengketa",
+      "forwardedDate": "2 November 2026",
+      "personInCharge": "H. Imanudin, S.H., M.H.",
+      "completionDate": "3 November 2026",
+      "completionStatus": "selesai",
+      "followUpResult": "Telah dilaksanakan layanan konsultasi dan pemberian penjelasan teknis terkait mekanisme penyelesaian sengketa proses Pemilu.",
+      "notesToApplicant": "Pemohon dapat mengajukan permohonan informasi lanjutan melalui PTSP apabila diperlukan.",
+      "unitOfficerName": "H. Imanudin, S.H., M.H.",
+      "surveyDate": "3 November 2026",
+      "surveyScores": {
+        "q1_prosedur": 4,
+        "q2_persyaratan": 4,
+        "q3_kecepatan": 4,
+        "q4_kompetensi": 4,
+        "q5_sikap": 4,
+        "q6_kesesuaian": 4,
+        "q7_sarana": 4,
+        "q8_pengaduan": 4
+      },
+      "surveyFeedback": "Pelayanan PTSP Bawaslu Kabupaten Subang sangat tertib, cepat, dan informatif.",
+      "overallSatisfaction": "sangat_puas",
+      "ptspOfficerSignature": "data:image/png;base64,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"
+    }
+  ],
+  "ptspSurveys": [
+    {
+      "id": "SKM-2026-004",
+      "createdAt": "2026-11-07T15:00:00+07:00",
+      "respondentName": "Rizky Pratama Putra",
+      "surveyDate": "7 November 2026",
+      "serviceType": "informasi_penanganan_pelanggaran",
+      "surveyScores": {
+        "q1_prosedur": 4,
+        "q2_persyaratan": 3,
+        "q3_kecepatan": 4,
+        "q4_kompetensi": 4,
+        "q5_sikap": 4,
+        "q6_kesesuaian": 4,
+        "q7_sarana": 4,
+        "q8_pengaduan": 4
+      },
+      "surveyFeedback": "Sangat terbantu dengan kejelasan informasi dan kinerja petugas PTSP.",
+      "overallSatisfaction": "puas"
+    },
+    {
+      "id": "SKM-2026-003",
+      "createdAt": "2026-11-06T11:20:00+07:00",
+      "respondentName": "Drs. Bambang Suryono, M.Si.",
+      "surveyDate": "6 November 2026",
+      "serviceType": "permohonan_audiensi",
+      "surveyScores": {
+        "q1_prosedur": 4,
+        "q2_persyaratan": 4,
+        "q3_kecepatan": 4,
+        "q4_kompetensi": 4,
+        "q5_sikap": 4,
+        "q6_kesesuaian": 4,
+        "q7_sarana": 4,
+        "q8_pengaduan": 4
+      },
+      "surveyFeedback": "Pendaftaran melalui sistem PTSP mudah dipahami dan responsif.",
+      "overallSatisfaction": "sangat_puas"
+    },
+    {
+      "id": "SKM-2026-002",
+      "createdAt": "2026-11-04T14:30:00+07:00",
+      "respondentName": "Nadia Putri Lestari, S.I.Kom.",
+      "surveyDate": "4 November 2026",
+      "serviceType": "konsultasi_kepemiluan",
+      "surveyScores": {
+        "q1_prosedur": 4,
+        "q2_persyaratan": 4,
+        "q3_kecepatan": 3,
+        "q4_kompetensi": 4,
+        "q5_sikap": 4,
+        "q6_kesesuaian": 4,
+        "q7_sarana": 3,
+        "q8_pengaduan": 4
+      },
+      "surveyFeedback": "Alur sistem pelayanan sangat rapi dan memudahkan pemohon dalam menyampaikan permohonan konsultasi.",
+      "overallSatisfaction": "sangat_puas"
+    },
+    {
+      "id": "SKM-2026-001",
+      "createdAt": "2026-11-02T10:15:00+07:00",
+      "respondentName": "H. Dedi Kurniawan, S.H.",
+      "surveyDate": "2 November 2026",
+      "serviceType": "ppid",
+      "surveyScores": {
+        "q1_prosedur": 4,
+        "q2_persyaratan": 4,
+        "q3_kecepatan": 4,
+        "q4_kompetensi": 4,
+        "q5_sikap": 4,
+        "q6_kesesuaian": 4,
+        "q7_sarana": 4,
+        "q8_pengaduan": 4
+      },
+      "surveyFeedback": "Pelayanan informasi publik dan sistem PTSP Bawaslu Kabupaten Subang sangat cepat, transparan, dan informatif.",
+      "overallSatisfaction": "sangat_puas"
+    }
+  ]
+}

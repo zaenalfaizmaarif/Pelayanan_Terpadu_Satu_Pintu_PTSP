@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   OfficerDeskPanel,
   OfficerWorkspaceTab,
@@ -43,6 +43,7 @@ import {
   FolderOpen,
   FileCheck,
   Activity,
+  Loader2,
 } from 'lucide-react';
 
 type ActiveTab = 'form' | 'register' | 'officer' | 'template';
@@ -95,7 +96,7 @@ export default function App() {
   const [officerPtspFormCode, setOfficerPtspFormCode] =
     useState<PtspFormCode>('formulir_2');
   const [selectedOfficerRecordId, setSelectedOfficerRecordId] =
-    useState<string>(INITIAL_PTSP_RECORDS[0]?.id || 'NEW_DRAFT');
+    useState<string>('');
 
   const [authToken, setAuthToken] = useState<string>(() => {
     try {
@@ -139,29 +140,72 @@ export default function App() {
       });
   }, [authToken]);
 
-  // Fetch records & surveys from server (XAMPP MySQL or server store) on mount
+  // Real-time sync of records & surveys from server + cross-tab localStorage listener
   useEffect(() => {
-    fetch('/api/ptsp/records')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (Array.isArray(data?.records) && data.records.length > 0) {
-          setPtspRecords(data.records);
-        }
-      })
-      .catch(() => {
-        // fallback to local state
-      });
+    const syncFromServer = () => {
+      fetch('/api/ptsp/records')
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (Array.isArray(data?.records) && data.records.length > 0) {
+            setPtspRecords(data.records);
+          }
+        })
+        .catch(() => {
+          // fallback to local state
+        });
 
-    fetch('/api/ptsp/surveys')
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (Array.isArray(data?.surveys) && data.surveys.length > 0) {
-          setPtspSurveys(data.surveys);
+      fetch('/api/ptsp/surveys')
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (Array.isArray(data?.surveys) && data.surveys.length > 0) {
+            setPtspSurveys(data.surveys);
+          }
+        })
+        .catch(() => {
+          // fallback to local state
+        });
+    };
+
+    syncFromServer();
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === PTSP_STORAGE_KEY && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setPtspRecords(parsed);
+          }
+        } catch {
+          // ignore
         }
-      })
-      .catch(() => {
-        // fallback to local state
-      });
+      }
+      if (e.key === PTSP_SURVEY_STORAGE_KEY && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setPtspSurveys(parsed);
+          }
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        syncFromServer();
+      }
+    };
+
+    const pollInterval = window.setInterval(syncFromServer, 6000);
+    window.addEventListener('storage', handleStorageChange);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(pollInterval);
+      window.removeEventListener('storage', handleStorageChange);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   useEffect(() => {
@@ -182,7 +226,9 @@ export default function App() {
 
   const handleSaveNewPtspRecord = (newRec: PtspRecord) => {
     setPtspRecords((prev) => [newRec, ...prev]);
-    setSelectedOfficerRecordId(newRec.id);
+    if (isOfficerPortalView) {
+      setSelectedOfficerRecordId(newRec.id);
+    }
     fetch('/api/ptsp/records', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -203,6 +249,8 @@ export default function App() {
     });
   };
 
+  const updateDebounceRef = useRef<Record<string, number>>({});
+
   const handleUpdatePtspRecord = (updatedRec: PtspRecord) => {
     setPtspRecords((prev) =>
       prev.map((item) => (item.id === updatedRec.id ? updatedRec : item))
@@ -210,13 +258,21 @@ export default function App() {
     if (inspectedPtspRecord?.id === updatedRec.id) {
       setInspectedPtspRecord(updatedRec);
     }
-    fetch(`/api/ptsp/records/${encodeURIComponent(updatedRec.id)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updatedRec),
-    }).catch(() => {
-      // ignore network error
-    });
+    if (typeof window !== 'undefined') {
+      const existingTimer = updateDebounceRef.current[updatedRec.id];
+      if (existingTimer) {
+        window.clearTimeout(existingTimer);
+      }
+      updateDebounceRef.current[updatedRec.id] = window.setTimeout(() => {
+        fetch(`/api/ptsp/records/${encodeURIComponent(updatedRec.id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedRec),
+        }).catch(() => {
+          // ignore network error
+        });
+      }, 300);
+    }
   };
 
   const handleOfficerLogin = (officer: AuthenticatedOfficer, token: string) => {
@@ -244,6 +300,8 @@ export default function App() {
     }
     setAuthenticatedOfficer(null);
     setAuthToken('');
+    setSelectedOfficerRecordId('');
+    setActiveTab((prev) => (prev === 'form' ? 'form' : 'officer'));
     try {
       sessionStorage.removeItem(OFFICER_TOKEN_KEY);
     } catch {
@@ -251,7 +309,75 @@ export default function App() {
     }
   };
 
-  const [activeTab, setActiveTab] = useState<ActiveTab>('form');
+  const detectPortalTabFromLocation = (): ActiveTab => {
+    if (typeof window !== 'undefined') {
+      const p = window.location.pathname.toLowerCase();
+      const h = window.location.hostname.toLowerCase();
+      const s = window.location.search.toLowerCase();
+      const hash = window.location.hash.toLowerCase();
+      if (
+        p.startsWith('/petugas') ||
+        p.startsWith('/meja-petugas') ||
+        h.startsWith('petugas.') ||
+        s.includes('portal=petugas') ||
+        hash === '#petugas'
+      ) {
+        return 'officer';
+      }
+    }
+    return 'form';
+  };
+
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() =>
+    detectPortalTabFromLocation()
+  );
+  const [featureLoadingText, setFeatureLoadingText] = useState<string | null>(
+    null
+  );
+
+  // Two-view indicator based strictly on link: 'form' = Link Pemohon (/pelayanan), otherwise = Link Petugas (/petugas)
+  const isOfficerPortalView = activeTab !== 'form';
+
+  const syncPortalUrl = (targetTab: ActiveTab) => {
+    if (typeof window === 'undefined') return;
+    const targetPath = targetTab === 'form' ? '/pelayanan' : '/petugas';
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState(null, '', targetPath);
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    // Normalize root path '/' to '/pelayanan' so the dedicated link is always explicit
+    if (window.location.pathname === '/') {
+      const initialTab = detectPortalTabFromLocation();
+      const normalizedPath = initialTab === 'form' ? '/pelayanan' : '/petugas';
+      window.history.replaceState(null, '', normalizedPath);
+    }
+
+    const handleLocationChange = () => {
+      const nextTab = detectPortalTabFromLocation();
+      setActiveTab((prev) => {
+        if (nextTab === 'form') return 'form';
+        return prev === 'form' ? 'officer' : prev;
+      });
+    };
+
+    window.addEventListener('popstate', handleLocationChange);
+    window.addEventListener('hashchange', handleLocationChange);
+    return () => {
+      window.removeEventListener('popstate', handleLocationChange);
+      window.removeEventListener('hashchange', handleLocationChange);
+    };
+  }, []);
+
+  const navigateWithAnimation = (label: string, callback: () => void) => {
+    setFeatureLoadingText(label);
+    callback();
+    window.setTimeout(() => {
+      setFeatureLoadingText(null);
+    }, 380);
+  };
 
   // Register filtering & modal preview state for PTSP records
   const [searchQuery, setSearchQuery] = useState('');
@@ -321,14 +447,39 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F8F6F2] text-slate-900">
-      {/* TOP BAR HEADER (INSTITUTIONAL BRANDING + ACCOUNT / SESSION BAR) */}
-      <header className="no-print sticky top-0 z-30 bg-gradient-to-r from-[#6B1114] via-[#7F1D1D] to-[#4C0519] text-white border-b-2 border-amber-500/80 px-6 py-3.5 flex items-center justify-between gap-6 shadow-xs">
+      {/* ANIMASI LOADING FITUR GLOBAL SAAT KLIK MENU / TOMBOL APAPUN */}
+      {featureLoadingText && (
+        <>
+          <div className="no-print fixed top-0 left-0 right-0 z-50 h-1 bg-red-950/30 overflow-hidden">
+            <div className="h-full w-1/2 bg-gradient-to-r from-amber-300 via-amber-400 to-amber-200 animate-ptsp-progress" />
+          </div>
+          <div className="no-print fixed bottom-5 right-5 z-50 bg-gradient-to-r from-[#7F1D1D] to-[#4C0519] text-white border border-amber-300/80 rounded-xl px-4 py-2.5 shadow-lg flex items-center gap-2.5 text-xs font-semibold animate-ptsp-fade-in">
+            <Loader2 className="w-4 h-4 text-amber-300 animate-spin shrink-0" />
+            <span>Membuka {featureLoadingText}...</span>
+          </div>
+        </>
+      )}
+
+      {/* TOP BAR HEADER (INSTITUTIONAL BRANDING — STRICTLY SEPARATED BY LINK) */}
+      <header className="no-print sticky top-0 z-30 bg-gradient-to-r from-[#6B1114] via-[#7F1D1D] to-[#4C0519] text-white border-b-2 border-amber-500/80 px-6 py-3.5 flex flex-wrap items-center justify-between gap-4 shadow-xs">
         {/* Left: Bawaslu Logo + PELAYANAN TERPADU SATU PINTU (PTSP) */}
         <a
-          href="#top"
+          href={isOfficerPortalView ? '/petugas' : '/pelayanan'}
           onClick={(e) => {
             e.preventDefault();
-            setActiveTab('form');
+            if (isOfficerPortalView) {
+              navigateWithAnimation('Meja Petugas PTSP', () => {
+                setOfficerSubTab('dashboard');
+                setActiveTab('officer');
+                syncPortalUrl('officer');
+              });
+            } else {
+              navigateWithAnimation('Pelayanan Pendaftaran PTSP', () => {
+                setApplicantSection('formulir_1');
+                setActiveTab('form');
+                syncPortalUrl('form');
+              });
+            }
           }}
           className="flex items-center gap-3.5 shrink-0"
         >
@@ -349,444 +500,454 @@ export default function App() {
               </span>
             </div>
             <p className="text-xs text-amber-100/85 hidden sm:block">
-              Sistem Administrasi Pelayanan Publik Terpadu · Bawaslu Kabupaten Subang
+              {isOfficerPortalView
+                ? 'Meja Petugas PTSP · Bawaslu Kabupaten Subang'
+                : 'Pelayanan Pendaftaran Pemohon · Bawaslu Kabupaten Subang'}
             </p>
           </div>
         </a>
 
-        {/* Right: Officer Profile & Logout (if logged in) OR Mode Switcher — Hidden on Layanan Pemohon (activeTab === 'form') */}
-        {activeTab !== 'form' && (
-          <div className="flex items-center gap-3.5 shrink-0">
-            {authenticatedOfficer ? (
-              <>
-                <div className="hidden md:block text-right">
-                  <div className="text-xs font-bold text-white">
-                    {authenticatedOfficer.fullName}
-                  </div>
-                  <div className="text-[11px] text-amber-100/80">
-                    Petugas Pelayanan PTSP Bawaslu Subang
-                  </div>
-                </div>
-                <div className="w-9 h-9 rounded-full bg-amber-400 text-red-950 text-xs font-bold flex items-center justify-center shrink-0 shadow-xs">
-                  {authenticatedOfficer.fullName.charAt(0)}
-                </div>
-                <button
-                  type="button"
-                  onClick={handleOfficerLogout}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-white/10 border border-white/25 hover:bg-white/20 rounded-lg transition-colors whitespace-nowrap shrink-0"
-                >
-                  <LogOut className="w-3.5 h-3.5 text-amber-300" />
-                  <span>Keluar</span>
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="hidden md:block text-right">
-                  <div className="text-xs font-bold text-white">
-                    Portal Layanan Pemohon
-                  </div>
-                  <div className="text-[11px] text-amber-100/80">
-                    Pengisian Formulir Pelayanan PTSP
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOfficerSubTab('dashboard');
-                    setActiveTab('officer');
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-red-950 bg-amber-400 hover:bg-amber-300 rounded-lg transition-colors whitespace-nowrap shrink-0 shadow-xs"
-                >
-                  <Lock className="w-3.5 h-3.5 text-red-950" />
-                  <span>Masuk Meja Petugas</span>
-                </button>
-              </>
-            )}
+        {/* Right: Officer Session (Only shown on Petugas link when authenticated) */}
+        {isOfficerPortalView && authenticatedOfficer && (
+          <div className="flex items-center gap-2.5 shrink-0">
+            <div className="hidden md:block text-right">
+              <div className="text-xs font-bold text-white">
+                {authenticatedOfficer.fullName}
+              </div>
+              <div className="text-[10.5px] text-amber-200/90">
+                Petugas Aktif
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                navigateWithAnimation('Keluar Sesi Petugas', () => {
+                  void handleOfficerLogout();
+                })
+              }
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-white/10 border border-white/25 hover:bg-white/20 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <LogOut className="w-3.5 h-3.5 text-amber-300" />
+              <span>Keluar</span>
+            </button>
           </div>
         )}
       </header>
 
-      {/* WORKSPACE CANVAS: LEFT SIDEBAR + MAIN CONTENT VIEWPORT */}
+      {/* WORKSPACE CANVAS: DEDICATED 2-VIEW ARCHITECTURE */}
       <div className="flex-1 flex flex-col lg:flex-row">
-        {/* LEFT SIDEBAR NAVIGATION */}
+        {/* LEFT SIDEBAR NAVIGATION — SHOWS ONLY MENUS FOR THE ACTIVE VIEW (PEMOHON OR PETUGAS) */}
         <aside className="no-print w-full lg:w-64 shrink-0 bg-white border-b lg:border-b-0 lg:border-r border-stone-200/90 p-4 flex flex-col justify-between gap-6">
-          <div className="space-y-6">
-            {/* Group 1: Layanan Pemohon (Tampilan Pengisian Formulir Pemohon) */}
-            <div className="space-y-1.5">
-              <div className="px-3 text-[11px] font-bold uppercase tracking-wider text-red-900/75">
-                Layanan Pemohon (Publik)
+          {!isOfficerPortalView ? (
+            /* ================= TAMPILAN 1 SIDEBAR: KHUSUS PELAYANAN PENDAFTARAN (PEMOHON) ================= */
+            <div className="space-y-4">
+              <div className="px-3 py-2.5 rounded-lg bg-red-50/80 border border-red-100">
+                <div className="text-xs font-bold text-red-950">
+                  Pelayanan Pendaftaran
+                </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setApplicantSection('formulir_1');
-                  setActiveTab('form');
-                }}
-                className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
-                  activeTab === 'form' && applicantSection === 'formulir_1'
-                    ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
-                    : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
-                }`}
-              >
-                <span className="flex items-center gap-2.5 truncate">
-                  <FileText
-                    className={`w-4 h-4 shrink-0 ${
-                      activeTab === 'form' && applicantSection === 'formulir_1'
-                        ? 'text-amber-300'
-                        : 'text-red-800/70'
-                    }`}
-                  />
-                  <span className="truncate">Pendaftaran Pelayanan PTSP</span>
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setApplicantSection('formulir_5');
-                  setActiveTab('form');
-                }}
-                className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
-                  activeTab === 'form' && applicantSection === 'formulir_5'
-                    ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
-                    : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
-                }`}
-              >
-                <span className="flex items-center gap-2.5 truncate">
-                  <FileCheck
-                    className={`w-4 h-4 shrink-0 ${
-                      activeTab === 'form' && applicantSection === 'formulir_5'
-                        ? 'text-amber-300'
-                        : 'text-red-800/70'
-                    }`}
-                  />
-                  <span className="truncate">Survei Kepuasan Masyarakat</span>
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setApplicantSection('lacak_status');
-                  setActiveTab('form');
-                }}
-                className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
-                  activeTab === 'form' && applicantSection === 'lacak_status'
-                    ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
-                    : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
-                }`}
-              >
-                <span className="flex items-center gap-2.5 truncate">
-                  <Search
-                    className={`w-4 h-4 shrink-0 ${
-                      activeTab === 'form' &&
-                      applicantSection === 'lacak_status'
-                        ? 'text-amber-300'
-                        : 'text-red-800/70'
-                    }`}
-                  />
-                  <span className="truncate">Lacak Status Permohonan</span>
-                </span>
-              </button>
-            </div>
-
-            {/* Group 2: Menu Meja Petugas PTSP (Tampilan Terpisah Khusus Petugas) */}
-            <div className="space-y-1.5 pt-4 border-t border-stone-200/90">
-              <div className="px-3 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-red-900/75">
-                <span>Menu Meja Petugas</span>
-                {!authenticatedOfficer && <Lock className="w-3 h-3 text-red-800/60" />}
-              </div>
-
-              {!authenticatedOfficer && (
+              <div className="space-y-1.5">
                 <button
                   type="button"
-                  onClick={() => setActiveTab('officer')}
-                  className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
-                    activeTab === 'officer'
+                  onClick={() =>
+                    navigateWithAnimation('Pendaftaran Pelayanan PTSP', () => {
+                      setApplicantSection('formulir_1');
+                      setActiveTab('form');
+                      syncPortalUrl('form');
+                    })
+                  }
+                  className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    activeTab === 'form' && applicantSection === 'formulir_1'
                       ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
-                      : 'text-red-900 bg-amber-50/80 hover:bg-amber-100/80 border border-amber-300/70'
+                      : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
                   }`}
                 >
                   <span className="flex items-center gap-2.5 truncate">
-                    <Lock
+                    <FileText
                       className={`w-4 h-4 shrink-0 ${
-                        activeTab === 'officer'
+                        activeTab === 'form' && applicantSection === 'formulir_1'
                           ? 'text-amber-300'
-                          : 'text-red-800'
+                          : 'text-red-800/70'
                       }`}
                     />
-                    <span className="truncate">Login Meja Petugas</span>
+                    <span className="truncate">Pendaftaran Pelayanan PTSP</span>
                   </span>
                 </button>
-              )}
 
-              <button
-                type="button"
-                onClick={() => {
-                  setOfficerSubTab('dashboard');
-                  setActiveTab('officer');
-                }}
-                title={
-                  !authenticatedOfficer
-                    ? 'Silakan login terlebih dahulu untuk mengakses Dashboard Pelayanan'
-                    : undefined
-                }
-                className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
-                  Boolean(authenticatedOfficer) &&
-                  activeTab === 'officer' &&
-                  officerSubTab === 'dashboard'
-                    ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
-                    : !authenticatedOfficer
-                    ? 'text-slate-400 hover:bg-stone-50'
-                    : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
-                }`}
-              >
-                <span className="flex items-center gap-2.5 truncate">
-                  <LayoutDashboard
-                    className={`w-4 h-4 shrink-0 ${
-                      Boolean(authenticatedOfficer) &&
-                      activeTab === 'officer' &&
-                      officerSubTab === 'dashboard'
-                        ? 'text-amber-300'
-                        : !authenticatedOfficer
-                        ? 'text-slate-400'
-                        : 'text-red-800/70'
-                    }`}
-                  />
-                  <span className="truncate">Dashboard Pelayanan</span>
-                </span>
-                {!authenticatedOfficer && (
-                  <Lock className="w-3 h-3 text-slate-300 shrink-0" />
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setOfficerPtspFormCode('formulir_2');
-                  setOfficerSubTab('ptsp_desk');
-                  setActiveTab('officer');
-                }}
-                title={
-                  !authenticatedOfficer
-                    ? 'Silakan login terlebih dahulu untuk mengakses Verifikasi Petugas'
-                    : undefined
-                }
-                className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
-                  Boolean(authenticatedOfficer) &&
-                  activeTab === 'officer' &&
-                  officerSubTab === 'ptsp_desk' &&
-                  officerPtspFormCode === 'formulir_2'
-                    ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
-                    : !authenticatedOfficer
-                    ? 'text-slate-400 hover:bg-stone-50'
-                    : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
-                }`}
-              >
-                <span className="flex items-center gap-2.5 truncate">
-                  <ClipboardCheck
-                    className={`w-4 h-4 shrink-0 ${
-                      Boolean(authenticatedOfficer) &&
-                      activeTab === 'officer' &&
-                      officerSubTab === 'ptsp_desk' &&
-                      officerPtspFormCode === 'formulir_2'
-                        ? 'text-amber-300'
-                        : !authenticatedOfficer
-                        ? 'text-slate-400'
-                        : 'text-red-800/70'
-                    }`}
-                  />
-                  <span className="truncate">Verifikasi Petugas</span>
-                </span>
-                {authenticatedOfficer ? (
-                  <span className="text-[11px] font-mono tabular-nums font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300/70 shrink-0">
-                    {ptspRecords.length}
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigateWithAnimation('Survei Kepuasan Masyarakat', () => {
+                      setApplicantSection('formulir_5');
+                      setActiveTab('form');
+                      syncPortalUrl('form');
+                    })
+                  }
+                  className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    activeTab === 'form' && applicantSection === 'formulir_5'
+                      ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
+                      : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
+                  }`}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <FileCheck
+                      className={`w-4 h-4 shrink-0 ${
+                        activeTab === 'form' && applicantSection === 'formulir_5'
+                          ? 'text-amber-300'
+                          : 'text-red-800/70'
+                      }`}
+                    />
+                    <span className="truncate">Survei Kepuasan Masyarakat</span>
                   </span>
-                ) : (
-                  <Lock className="w-3 h-3 text-slate-300 shrink-0" />
-                )}
-              </button>
+                </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setOfficerPtspFormCode('formulir_3');
-                  setOfficerSubTab('ptsp_desk');
-                  setActiveTab('officer');
-                }}
-                title={
-                  !authenticatedOfficer
-                    ? 'Silakan login terlebih dahulu untuk mengakses Tanda Terima Layanan'
-                    : undefined
-                }
-                className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
-                  Boolean(authenticatedOfficer) &&
-                  activeTab === 'officer' &&
-                  officerSubTab === 'ptsp_desk' &&
-                  officerPtspFormCode === 'formulir_3'
-                    ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
-                    : !authenticatedOfficer
-                    ? 'text-slate-400 hover:bg-stone-50'
-                    : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
-                }`}
-              >
-                <span className="flex items-center gap-2.5 truncate">
-                  <FileCheck
-                    className={`w-4 h-4 shrink-0 ${
-                      Boolean(authenticatedOfficer) &&
-                      activeTab === 'officer' &&
-                      officerSubTab === 'ptsp_desk' &&
-                      officerPtspFormCode === 'formulir_3'
-                        ? 'text-amber-300'
-                        : !authenticatedOfficer
-                        ? 'text-slate-400'
-                        : 'text-red-800/70'
-                    }`}
-                  />
-                  <span className="truncate">Tanda Terima Layanan</span>
-                </span>
-                {!authenticatedOfficer && (
-                  <Lock className="w-3 h-3 text-slate-300 shrink-0" />
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setOfficerPtspFormCode('formulir_4');
-                  setOfficerSubTab('ptsp_desk');
-                  setActiveTab('officer');
-                }}
-                title={
-                  !authenticatedOfficer
-                    ? 'Silakan login terlebih dahulu untuk mengakses Monitoring Pelayanan'
-                    : undefined
-                }
-                className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
-                  Boolean(authenticatedOfficer) &&
-                  activeTab === 'officer' &&
-                  officerSubTab === 'ptsp_desk' &&
-                  officerPtspFormCode === 'formulir_4'
-                    ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
-                    : !authenticatedOfficer
-                    ? 'text-slate-400 hover:bg-stone-50'
-                    : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
-                }`}
-              >
-                <span className="flex items-center gap-2.5 truncate">
-                  <Activity
-                    className={`w-4 h-4 shrink-0 ${
-                      Boolean(authenticatedOfficer) &&
-                      activeTab === 'officer' &&
-                      officerSubTab === 'ptsp_desk' &&
-                      officerPtspFormCode === 'formulir_4'
-                        ? 'text-amber-300'
-                        : !authenticatedOfficer
-                        ? 'text-slate-400'
-                        : 'text-red-800/70'
-                    }`}
-                  />
-                  <span className="truncate">Monitoring Pelayanan</span>
-                </span>
-                {!authenticatedOfficer && (
-                  <Lock className="w-3 h-3 text-slate-300 shrink-0" />
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setOfficerPtspFormCode('formulir_lampiran');
-                  setOfficerSubTab('ptsp_desk');
-                  setActiveTab('officer');
-                }}
-                title={
-                  !authenticatedOfficer
-                    ? 'Silakan login terlebih dahulu untuk mengakses Pedoman & Register PTSP'
-                    : undefined
-                }
-                className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
-                  Boolean(authenticatedOfficer) &&
-                  activeTab === 'officer' &&
-                  officerSubTab === 'ptsp_desk' &&
-                  officerPtspFormCode === 'formulir_lampiran'
-                    ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
-                    : !authenticatedOfficer
-                    ? 'text-slate-400 hover:bg-stone-50'
-                    : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
-                }`}
-              >
-                <span className="flex items-center gap-2.5 truncate">
-                  <BookOpen
-                    className={`w-4 h-4 shrink-0 ${
-                      Boolean(authenticatedOfficer) &&
-                      activeTab === 'officer' &&
-                      officerSubTab === 'ptsp_desk' &&
-                      officerPtspFormCode === 'formulir_lampiran'
-                        ? 'text-amber-300'
-                        : !authenticatedOfficer
-                        ? 'text-slate-400'
-                        : 'text-red-800/70'
-                    }`}
-                  />
-                  <span className="truncate">Pedoman &amp; Register PTSP</span>
-                </span>
-                {!authenticatedOfficer && (
-                  <Lock className="w-3 h-3 text-slate-300 shrink-0" />
-                )}
-              </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigateWithAnimation('Lacak Status Permohonan', () => {
+                      setApplicantSection('lacak_status');
+                      setActiveTab('form');
+                      syncPortalUrl('form');
+                    })
+                  }
+                  className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    activeTab === 'form' && applicantSection === 'lacak_status'
+                      ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
+                      : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
+                  }`}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <Search
+                      className={`w-4 h-4 shrink-0 ${
+                        activeTab === 'form' &&
+                        applicantSection === 'lacak_status'
+                          ? 'text-amber-300'
+                          : 'text-red-800/70'
+                      }`}
+                    />
+                    <span className="truncate">Lacak Status Permohonan</span>
+                  </span>
+                </button>
+              </div>
             </div>
-
-            {/* Group 3: Dokumen & Utilitas */}
-            <div className="space-y-1.5 pt-4 border-t border-stone-200/90">
-              <div className="px-3 text-[11px] font-bold uppercase tracking-wider text-red-900/75">
-                Dokumen &amp; Register
+          ) : (
+            /* ================= TAMPILAN 2 SIDEBAR: KHUSUS MEJA PETUGAS PTSP ================= */
+            <div className="space-y-4">
+              <div className="px-3 py-2.5 rounded-lg bg-amber-50/90 border border-amber-200/80">
+                <div className="text-xs font-bold text-red-950">
+                  Meja Petugas PTSP
+                </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setActiveTab('register')}
-                className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
-                  activeTab === 'register'
-                    ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
-                    : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
-                }`}
-              >
-                <span className="flex items-center gap-2.5 truncate">
-                  <BookOpen
-                    className={`w-4 h-4 shrink-0 ${
-                      activeTab === 'register'
-                        ? 'text-amber-300'
-                        : 'text-red-800/70'
-                    }`}
-                  />
-                  <span className="truncate">Buku Register Harian PTSP</span>
-                </span>
-              </button>
+              <div className="space-y-1.5">
+                {!authenticatedOfficer && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      navigateWithAnimation('Login Meja Petugas', () => {
+                        setActiveTab('officer');
+                        syncPortalUrl('officer');
+                      })
+                    }
+                    className="w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs"
+                  >
+                    <span className="flex items-center gap-2.5 truncate">
+                      <Lock className="w-4 h-4 shrink-0 text-amber-300" />
+                      <span className="truncate">Login Meja Petugas</span>
+                    </span>
+                  </button>
+                )}
 
-              <button
-                type="button"
-                onClick={() => setActiveTab('template')}
-                className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all ${
-                  activeTab === 'template'
-                    ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
-                    : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
-                }`}
-              >
-                <span className="flex items-center gap-2.5 truncate">
-                  <FolderOpen
-                    className={`w-4 h-4 shrink-0 ${
-                      activeTab === 'template'
-                        ? 'text-amber-300'
-                        : 'text-red-800/70'
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigateWithAnimation('Dashboard Pelayanan PTSP', () => {
+                      setOfficerSubTab('dashboard');
+                      setActiveTab('officer');
+                      syncPortalUrl('officer');
+                    })
+                  }
+                  className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    Boolean(authenticatedOfficer) &&
+                    activeTab === 'officer' &&
+                    officerSubTab === 'dashboard'
+                      ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
+                      : !authenticatedOfficer
+                      ? 'text-slate-400 hover:bg-stone-50'
+                      : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
+                  }`}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <LayoutDashboard
+                      className={`w-4 h-4 shrink-0 ${
+                        Boolean(authenticatedOfficer) &&
+                        activeTab === 'officer' &&
+                        officerSubTab === 'dashboard'
+                          ? 'text-amber-300'
+                          : !authenticatedOfficer
+                          ? 'text-slate-400'
+                          : 'text-red-800/70'
+                      }`}
+                    />
+                    <span className="truncate">Dashboard Pelayanan</span>
+                  </span>
+                  {!authenticatedOfficer && (
+                    <Lock className="w-3 h-3 text-slate-300 shrink-0" />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigateWithAnimation('Verifikasi Petugas PTSP', () => {
+                      setSelectedOfficerRecordId('');
+                      setOfficerPtspFormCode('formulir_2');
+                      setOfficerSubTab('ptsp_desk');
+                      setActiveTab('officer');
+                      syncPortalUrl('officer');
+                    })
+                  }
+                  className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    Boolean(authenticatedOfficer) &&
+                    activeTab === 'officer' &&
+                    officerSubTab === 'ptsp_desk' &&
+                    officerPtspFormCode === 'formulir_2'
+                      ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
+                      : !authenticatedOfficer
+                      ? 'text-slate-400 hover:bg-stone-50'
+                      : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
+                  }`}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <ClipboardCheck
+                      className={`w-4 h-4 shrink-0 ${
+                        Boolean(authenticatedOfficer) &&
+                        activeTab === 'officer' &&
+                        officerSubTab === 'ptsp_desk' &&
+                        officerPtspFormCode === 'formulir_2'
+                          ? 'text-amber-300'
+                          : !authenticatedOfficer
+                          ? 'text-slate-400'
+                          : 'text-red-800/70'
+                      }`}
+                    />
+                    <span className="truncate">Verifikasi Petugas</span>
+                  </span>
+                  {authenticatedOfficer ? (
+                    (() => {
+                      const pendingCount = ptspRecords.filter(
+                        (r) => r.completionStatus === 'menunggu_verifikasi'
+                      ).length;
+                      return pendingCount > 0 ? (
+                        <span className="text-[11px] font-mono tabular-nums font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300/70 shrink-0">
+                          {pendingCount}
+                        </span>
+                      ) : null;
+                    })()
+                  ) : (
+                    <Lock className="w-3 h-3 text-slate-300 shrink-0" />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigateWithAnimation('Tanda Terima Layanan', () => {
+                      setSelectedOfficerRecordId('');
+                      setOfficerPtspFormCode('formulir_3');
+                      setOfficerSubTab('ptsp_desk');
+                      setActiveTab('officer');
+                      syncPortalUrl('officer');
+                    })
+                  }
+                  className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    Boolean(authenticatedOfficer) &&
+                    activeTab === 'officer' &&
+                    officerSubTab === 'ptsp_desk' &&
+                    officerPtspFormCode === 'formulir_3'
+                      ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
+                      : !authenticatedOfficer
+                      ? 'text-slate-400 hover:bg-stone-50'
+                      : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
+                  }`}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <FileCheck
+                      className={`w-4 h-4 shrink-0 ${
+                        Boolean(authenticatedOfficer) &&
+                        activeTab === 'officer' &&
+                        officerSubTab === 'ptsp_desk' &&
+                        officerPtspFormCode === 'formulir_3'
+                          ? 'text-amber-300'
+                          : !authenticatedOfficer
+                          ? 'text-slate-400'
+                          : 'text-red-800/70'
+                      }`}
+                    />
+                    <span className="truncate">Tanda Terima Layanan</span>
+                  </span>
+                  {!authenticatedOfficer && (
+                    <Lock className="w-3 h-3 text-slate-300 shrink-0" />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigateWithAnimation('Monitoring Pelayanan', () => {
+                      setSelectedOfficerRecordId('');
+                      setOfficerPtspFormCode('formulir_4');
+                      setOfficerSubTab('ptsp_desk');
+                      setActiveTab('officer');
+                      syncPortalUrl('officer');
+                    })
+                  }
+                  className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    Boolean(authenticatedOfficer) &&
+                    activeTab === 'officer' &&
+                    officerSubTab === 'ptsp_desk' &&
+                    officerPtspFormCode === 'formulir_4'
+                      ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
+                      : !authenticatedOfficer
+                      ? 'text-slate-400 hover:bg-stone-50'
+                      : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
+                  }`}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <Activity
+                      className={`w-4 h-4 shrink-0 ${
+                        Boolean(authenticatedOfficer) &&
+                        activeTab === 'officer' &&
+                        officerSubTab === 'ptsp_desk' &&
+                        officerPtspFormCode === 'formulir_4'
+                          ? 'text-amber-300'
+                          : !authenticatedOfficer
+                          ? 'text-slate-400'
+                          : 'text-red-800/70'
+                      }`}
+                    />
+                    <span className="truncate">Monitoring Pelayanan</span>
+                  </span>
+                  {!authenticatedOfficer && (
+                    <Lock className="w-3 h-3 text-slate-300 shrink-0" />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigateWithAnimation('Pedoman & Register PTSP', () => {
+                      setOfficerPtspFormCode('formulir_lampiran');
+                      setOfficerSubTab('ptsp_desk');
+                      setActiveTab('officer');
+                      syncPortalUrl('officer');
+                    })
+                  }
+                  className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    Boolean(authenticatedOfficer) &&
+                    activeTab === 'officer' &&
+                    officerSubTab === 'ptsp_desk' &&
+                    officerPtspFormCode === 'formulir_lampiran'
+                      ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
+                      : !authenticatedOfficer
+                      ? 'text-slate-400 hover:bg-stone-50'
+                      : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
+                  }`}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <BookOpen
+                      className={`w-4 h-4 shrink-0 ${
+                        Boolean(authenticatedOfficer) &&
+                        activeTab === 'officer' &&
+                        officerSubTab === 'ptsp_desk' &&
+                        officerPtspFormCode === 'formulir_lampiran'
+                          ? 'text-amber-300'
+                          : !authenticatedOfficer
+                          ? 'text-slate-400'
+                          : 'text-red-800/70'
+                      }`}
+                    />
+                    <span className="truncate">Pedoman &amp; Register PTSP</span>
+                  </span>
+                  {!authenticatedOfficer && (
+                    <Lock className="w-3 h-3 text-slate-300 shrink-0" />
+                  )}
+                </button>
+
+                <div className="pt-3 mt-3 border-t border-stone-200/80 space-y-1.5">
+                  <div className="px-3 text-[10.5px] font-bold uppercase tracking-wider text-red-900/75">
+                    Arsip &amp; Dokumen Petugas
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      navigateWithAnimation('Buku Register Harian PTSP', () => {
+                        setActiveTab(authenticatedOfficer ? 'register' : 'officer');
+                        syncPortalUrl('officer');
+                      })
+                    }
+                    className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      Boolean(authenticatedOfficer) && activeTab === 'register'
+                        ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
+                        : !authenticatedOfficer
+                        ? 'text-slate-400 hover:bg-stone-50'
+                        : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
                     }`}
-                  />
-                  <span className="truncate">Template Dokumen Resmi</span>
-                </span>
-              </button>
+                  >
+                    <span className="flex items-center gap-2.5 truncate">
+                      <BookOpen
+                        className={`w-4 h-4 shrink-0 ${
+                          Boolean(authenticatedOfficer) && activeTab === 'register'
+                            ? 'text-amber-300'
+                            : !authenticatedOfficer
+                            ? 'text-slate-400'
+                            : 'text-red-800/70'
+                        }`}
+                      />
+                      <span className="truncate">Buku Register Harian PTSP</span>
+                    </span>
+                    {!authenticatedOfficer && (
+                      <Lock className="w-3 h-3 text-slate-300 shrink-0" />
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      navigateWithAnimation('Template Dokumen Resmi PTSP', () => {
+                        setActiveTab(authenticatedOfficer ? 'template' : 'officer');
+                        syncPortalUrl('officer');
+                      })
+                    }
+                    className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      Boolean(authenticatedOfficer) && activeTab === 'template'
+                        ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
+                        : !authenticatedOfficer
+                        ? 'text-slate-400 hover:bg-stone-50'
+                        : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2.5 truncate">
+                      <FolderOpen
+                        className={`w-4 h-4 shrink-0 ${
+                          Boolean(authenticatedOfficer) && activeTab === 'template'
+                            ? 'text-amber-300'
+                            : !authenticatedOfficer
+                            ? 'text-slate-400'
+                            : 'text-red-800/70'
+                        }`}
+                      />
+                      <span className="truncate">Template Dokumen Resmi</span>
+                    </span>
+                    {!authenticatedOfficer && (
+                      <Lock className="w-3 h-3 text-slate-300 shrink-0" />
+                    )}
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Bottom Sidebar Institutional Info */}
           <div className="hidden lg:block rounded-xl bg-gradient-to-br from-amber-50/90 via-red-50/40 to-stone-50 border border-amber-200/80 p-3.5 text-[11px] text-slate-600 space-y-1">
@@ -801,10 +962,14 @@ export default function App() {
         </aside>
 
         {/* MAIN CONTENT VIEWPORT */}
-        <main className="flex-1 min-w-0 max-w-[1260px] w-full mx-auto px-6 py-7">
+        <main
+          className={`flex-1 min-w-0 max-w-[1260px] w-full mx-auto px-6 py-7 print:p-0 print:max-w-none ${
+            inspectedPtspRecord ? 'no-print' : ''
+          }`}
+        >
           {/* TAB 1: TAMPILAN LAYANAN PEMOHON (TERPISAH DARI MEJA PETUGAS) */}
           {activeTab === 'form' && (
-            <div className="space-y-6">
+            <div key={`form-${applicantSection}`} className="space-y-6 animate-ptsp-fade-in">
               {/* PILIHAN LAYANAN KHUSUS PEMOHON / MASYARAKAT */}
               <div className="no-print bg-white border border-stone-200/90 rounded-xl overflow-hidden shadow-2xs">
                 <div className="bg-gradient-to-r from-red-50/90 via-amber-50/50 to-white border-b border-stone-200/80 px-5 py-4">
@@ -827,11 +992,13 @@ export default function App() {
                         key={item.code}
                         type="button"
                         onClick={() =>
-                          setApplicantSection(
-                            item.code as 'formulir_1' | 'formulir_5'
-                          )
+                          navigateWithAnimation(item.fullTitle, () => {
+                            setApplicantSection(
+                              item.code as 'formulir_1' | 'formulir_5'
+                            );
+                          })
                         }
-                        className={`p-4 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                        className={`p-4 rounded-xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
                           isSelected
                             ? 'border-red-800 bg-gradient-to-br from-red-50/90 via-white to-amber-50/60 text-slate-900 ring-1 ring-red-800/15 shadow-xs'
                             : 'border-stone-200/90 hover:border-red-300 hover:bg-red-50/20 text-slate-700 bg-white'
@@ -867,8 +1034,12 @@ export default function App() {
                   {/* Dedicated 3rd Card: Lacak Status Permohonan */}
                   <button
                     type="button"
-                    onClick={() => setApplicantSection('lacak_status')}
-                    className={`p-4 rounded-xl border text-left transition-all flex flex-col justify-between ${
+                    onClick={() =>
+                      navigateWithAnimation('Lacak Status Permohonan', () => {
+                        setApplicantSection('lacak_status');
+                      })
+                    }
+                    className={`p-4 rounded-xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
                       applicantSection === 'lacak_status'
                         ? 'border-red-800 bg-gradient-to-br from-red-50/90 via-white to-amber-50/60 text-slate-900 ring-1 ring-red-800/15 shadow-xs'
                         : 'border-stone-200/90 hover:border-red-300 hover:bg-red-50/20 text-slate-700 bg-white'
@@ -907,10 +1078,12 @@ export default function App() {
                 <ApplicationTrackerCard
                   records={ptspRecords}
                   mode="applicant"
-                  onInspectPrintRecord={(rec, code) => {
-                    setInspectedFormCode(code);
-                    setInspectedPtspRecord(rec);
-                  }}
+                  onInspectPrintRecord={(rec, code) =>
+                    navigateWithAnimation('Pratinjau & Cetak Dokumen', () => {
+                      setInspectedFormCode(code);
+                      setInspectedPtspRecord(rec);
+                    })
+                  }
                 />
               ) : (
                 <PtspWorkspace
@@ -919,14 +1092,31 @@ export default function App() {
                   onUpdateRecord={handleUpdatePtspRecord}
                   onSaveSurveyEntry={handleSaveNewSurvey}
                   authenticatedOfficer={authenticatedOfficer}
-                  onRequestOfficerLogin={() => setActiveTab('officer')}
+                  onRequestOfficerLogin={() =>
+                    navigateWithAnimation('Login Meja Petugas', () => {
+                      setActiveTab('officer');
+                    })
+                  }
                   externalFormCode={applicantFormCode}
                   onChangeFormCode={(code) =>
-                    setApplicantSection(
-                      code === 'formulir_5' ? 'formulir_5' : 'formulir_1'
+                    navigateWithAnimation(
+                      code === 'formulir_5'
+                        ? 'Survei Kepuasan Masyarakat'
+                        : 'Pendaftaran Pelayanan PTSP',
+                      () => {
+                        setApplicantSection(
+                          code === 'formulir_5' ? 'formulir_5' : 'formulir_1'
+                        );
+                      }
                     )
                   }
                   workspaceRole="applicant"
+                  onInspectPrintRecord={(rec, code) =>
+                    navigateWithAnimation('Pratinjau & Cetak Dokumen', () => {
+                      setInspectedFormCode(code);
+                      setInspectedPtspRecord(rec);
+                    })
+                  }
                 />
               )}
             </div>
@@ -934,7 +1124,7 @@ export default function App() {
 
           {/* TAB 2: BUKU REGISTER HARIAN PTSP */}
           {activeTab === 'register' && (
-            <div className="space-y-6 no-print">
+            <div key="register-tab" className="space-y-6 no-print animate-ptsp-fade-in">
               <div className="bg-white border border-stone-200/90 rounded-xl overflow-hidden shadow-2xs">
                 <div className="bg-gradient-to-r from-[#7F1D1D] via-[#6B1114] to-[#4C0519] text-white px-6 py-5 border-b-2 border-amber-400/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
@@ -949,22 +1139,15 @@ export default function App() {
                   <div className="flex items-center gap-2.5">
                     <button
                       type="button"
-                      onClick={exportRegisterCsv}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-white/10 hover:bg-white/20 border border-white/25 rounded-lg transition-colors whitespace-nowrap shrink-0"
+                      onClick={() =>
+                        navigateWithAnimation('Unduh CSV Register PTSP', () => {
+                          exportRegisterCsv();
+                        })
+                      }
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-white/10 hover:bg-white/20 border border-white/25 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                     >
                       <Download className="w-3.5 h-3.5 text-amber-300" />
                       Unduh CSV Register PTSP
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setApplicantSection('formulir_1');
-                        setActiveTab('form');
-                      }}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-red-950 bg-amber-400 hover:bg-amber-300 rounded-lg transition-colors whitespace-nowrap shrink-0 shadow-xs"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      Pendaftaran Baru
                     </button>
                   </div>
                 </div>
@@ -1046,6 +1229,9 @@ export default function App() {
                                 </div>
                                 <div className="text-[11px] text-slate-500 mt-0.5 break-normal">
                                   {rec.receivedDate || rec.dayAndDate}
+                                  {rec.receivedTime
+                                    ? ` · ${rec.receivedTime}`
+                                    : ''}
                                 </div>
                               </td>
                               <td className="py-3.5 px-3.5 align-top break-words">
@@ -1101,23 +1287,33 @@ export default function App() {
                                 <div className="flex flex-col items-end gap-1.5">
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setInspectedFormCode('formulir_1');
-                                      setInspectedPtspRecord(rec);
-                                    }}
-                                    className="w-full sm:w-auto px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 bg-stone-100 hover:bg-stone-200 rounded-md transition-colors text-center"
+                                    onClick={() =>
+                                      navigateWithAnimation(
+                                        `Dokumen ${rec.registrationNumber}`,
+                                        () => {
+                                          setInspectedFormCode('formulir_1');
+                                          setInspectedPtspRecord(rec);
+                                        }
+                                      )
+                                    }
+                                    className="w-full sm:w-auto px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 bg-stone-100 hover:bg-stone-200 rounded-md transition-colors text-center cursor-pointer"
                                   >
                                     Lihat &amp; Cetak
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setSelectedOfficerRecordId(rec.id);
-                                      setOfficerPtspFormCode('formulir_2');
-                                      setOfficerSubTab('ptsp_desk');
-                                      setActiveTab('officer');
-                                    }}
-                                    className="w-full sm:w-auto inline-flex items-center justify-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-red-900 bg-red-50 hover:bg-red-100 border border-red-200/80 rounded-md transition-colors"
+                                    onClick={() =>
+                                      navigateWithAnimation(
+                                        `Verifikasi Berkas ${rec.registrationNumber}`,
+                                        () => {
+                                          setSelectedOfficerRecordId(rec.id);
+                                          setOfficerPtspFormCode('formulir_2');
+                                          setOfficerSubTab('ptsp_desk');
+                                          setActiveTab('officer');
+                                        }
+                                      )
+                                    }
+                                    className="w-full sm:w-auto inline-flex items-center justify-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold text-red-900 bg-red-50 hover:bg-red-100 border border-red-200/80 rounded-md transition-colors cursor-pointer"
                                   >
                                     {!authenticatedOfficer && (
                                       <Lock className="w-3 h-3 shrink-0" />
@@ -1139,9 +1335,11 @@ export default function App() {
 
           {/* TAB 3: MEJA PETUGAS PTSP (PROTECTED BY SERVER LOGIN GATE) */}
           {activeTab === 'officer' && (
-            <div className="no-print">
+            <div key={`officer-${officerSubTab}-${officerPtspFormCode}`} className="animate-ptsp-fade-in">
               {!authenticatedOfficer ? (
-                <OfficerLoginGate onLoginSuccess={handleOfficerLogin} />
+                <div className="no-print">
+                  <OfficerLoginGate onLoginSuccess={handleOfficerLogin} />
+                </div>
               ) : (
                 <OfficerDeskPanel
                   currentOfficer={authenticatedOfficer}
@@ -1153,15 +1351,28 @@ export default function App() {
                   onSaveNewPtspRecord={handleSaveNewPtspRecord}
                   onUpdatePtspRecord={handleUpdatePtspRecord}
                   officerSubTab={officerSubTab}
-                  onChangeOfficerSubTab={setOfficerSubTab}
+                  onChangeOfficerSubTab={(tab) =>
+                    navigateWithAnimation(
+                      tab === 'dashboard'
+                        ? 'Dashboard Pelayanan PTSP'
+                        : 'Meja Petugas PTSP',
+                      () => setOfficerSubTab(tab)
+                    )
+                  }
                   officerPtspFormCode={officerPtspFormCode}
-                  onChangeOfficerPtspFormCode={setOfficerPtspFormCode}
+                  onChangeOfficerPtspFormCode={(code) =>
+                    navigateWithAnimation('Formulir Layanan Petugas', () =>
+                      setOfficerPtspFormCode(code)
+                    )
+                  }
                   selectedPtspRecordId={selectedOfficerRecordId}
                   onChangeSelectedPtspRecordId={setSelectedOfficerRecordId}
-                  onInspectPrintRecord={(rec, code) => {
-                    setInspectedFormCode(code);
-                    setInspectedPtspRecord(rec);
-                  }}
+                  onInspectPrintRecord={(rec, code) =>
+                    navigateWithAnimation('Pratinjau & Cetak Dokumen', () => {
+                      setInspectedFormCode(code);
+                      setInspectedPtspRecord(rec);
+                    })
+                  }
                 />
               )}
             </div>
@@ -1169,7 +1380,7 @@ export default function App() {
 
           {/* TAB 4: DOKUMEN BLANKO RESMI PAKET PELAYANAN PTSP */}
           {activeTab === 'template' && (
-            <div className="no-print max-w-3xl mx-auto space-y-6">
+            <div key="template-tab" className="no-print max-w-3xl mx-auto space-y-6 animate-ptsp-fade-in">
               <div className="bg-white border border-stone-200/90 rounded-xl overflow-hidden shadow-2xs">
                 <div className="bg-gradient-to-r from-[#7F1D1D] via-[#6B1114] to-[#4C0519] text-white px-6 py-5 border-b-2 border-amber-400/80">
                   <h2 className="text-lg font-bold text-white">

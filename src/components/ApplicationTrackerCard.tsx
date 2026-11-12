@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   PtspRecord,
   PtspFormCode,
@@ -15,6 +15,7 @@ import {
   ClipboardCheck,
   AlertCircle,
   X,
+  Loader2,
 } from 'lucide-react';
 
 interface ApplicationTrackerCardProps {
@@ -32,25 +33,18 @@ export const ApplicationTrackerCard: React.FC<ApplicationTrackerCardProps> = ({
 }) => {
   const [query, setQuery] = useState('');
   const [searchedQuery, setSearchedQuery] = useState<string | null>(null);
-  const [matchedRecords, setMatchedRecords] = useState<PtspRecord[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
-  const handleTrackSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = query.trim();
-    if (!trimmed) {
-      setSearchedQuery(null);
-      setMatchedRecords([]);
-      return;
-    }
-
-    const qUpper = trimmed.toUpperCase();
-    const found = records.filter((rec) => {
+  const matchedRecords = useMemo(() => {
+    if (!searchedQuery) return [];
+    const qUpper = searchedQuery.trim().toUpperCase();
+    if (!qUpper) return [];
+    return records.filter((rec) => {
       const regUpper = rec.registrationNumber.trim().toUpperCase();
       const idUpper = rec.id.trim().toUpperCase();
       const nameUpper = rec.fullName.trim().toUpperCase();
       const nikUpper = rec.nikOrIdentity.trim().toUpperCase();
 
-      // Match exact or partial registration number, ID (e.g., PTSP-2026-001), leading sequence (e.g., 001), name, or NIK
       const seqMatch = regUpper.match(/^(\d+)/);
       const queryNumMatch = qUpper.match(/^0*(\d+)$/);
       const isSeqEqual =
@@ -66,15 +60,28 @@ export const ApplicationTrackerCard: React.FC<ApplicationTrackerCardProps> = ({
         Boolean(isSeqEqual)
       );
     });
+  }, [records, searchedQuery]);
 
-    setSearchedQuery(trimmed);
-    setMatchedRecords(found);
+  const handleTrackSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isSearching) return;
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setSearchedQuery(null);
+      return;
+    }
+
+    setIsSearching(true);
+    setTimeout(() => {
+      setSearchedQuery(trimmed);
+      setIsSearching(false);
+    }, 400);
   };
 
   const handleQuickClear = () => {
     setQuery('');
     setSearchedQuery(null);
-    setMatchedRecords([]);
+    setIsSearching(false);
   };
 
   return (
@@ -116,15 +123,30 @@ export const ApplicationTrackerCard: React.FC<ApplicationTrackerCardProps> = ({
 
           <button
             type="submit"
-            className="px-6 py-3 text-sm font-bold text-white bg-gradient-to-r from-[#7F1D1D] to-[#58111A] hover:from-red-900 hover:to-red-950 rounded-xl transition-all whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
+            disabled={isSearching}
+            className="inline-flex items-center justify-center gap-2 px-6 py-3 text-sm font-bold text-white bg-gradient-to-r from-[#7F1D1D] to-[#58111A] hover:from-red-900 hover:to-red-950 disabled:opacity-75 rounded-xl transition-all whitespace-nowrap shrink-0 cursor-pointer shadow-xs"
           >
-            Lacak Berkas
+            {isSearching ? (
+              <>
+                <Loader2 className="w-4 h-4 text-amber-300 animate-spin" />
+                <span>Melacak...</span>
+              </>
+            ) : (
+              <span>Lacak Berkas</span>
+            )}
           </button>
         </form>
       </div>
 
+      {isSearching && (
+        <div className="max-w-3xl mx-auto mt-6 pt-6 border-t border-slate-200 flex items-center justify-center gap-2.5 text-xs font-semibold text-red-900 py-4">
+          <Loader2 className="w-4 h-4 text-red-800 animate-spin" />
+          <span>Mencari berkas permohonan pada Register Harian PTSP...</span>
+        </div>
+      )}
+
       {/* SEARCH RESULTS */}
-      {searchedQuery !== null && (
+      {!isSearching && searchedQuery !== null && (
         <div className="max-w-3xl mx-auto mt-6 pt-6 border-t border-slate-200">
           {matchedRecords.length === 0 ? (
             <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 flex items-start gap-3 text-xs text-amber-900">

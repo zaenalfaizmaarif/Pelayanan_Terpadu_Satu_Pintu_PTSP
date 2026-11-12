@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   PtspRecord,
   PtspFormCode,
@@ -25,12 +25,18 @@ import { SignaturePad } from './SignaturePad';
 import { AuthenticatedOfficer } from './OfficerLoginGate';
 import {
   Printer,
-  Plus,
   CheckCircle2,
   Lock,
   Save,
   Download,
   RotateCcw,
+  Loader2,
+  Search,
+  FolderOpen,
+  Copy,
+  Check,
+  FileText,
+  X,
 } from 'lucide-react';
 
 interface PtspWorkspaceProps {
@@ -45,6 +51,38 @@ interface PtspWorkspaceProps {
   selectedRecordIdExternal?: string;
   onChangeSelectedRecordId?: (id: string) => void;
   onSaveSurveyEntry?: (survey: PtspSurveyEntry) => void;
+  onInspectPrintRecord?: (rec: PtspRecord, code: PtspFormCode) => void;
+}
+
+function formatIndonesianDayDate(d: Date = new Date()): string {
+  return new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(d);
+}
+
+function formatIndonesianDateOnly(d: Date = new Date()): string {
+  return new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(d);
+}
+
+function formatWibTime(d: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(d);
+  const hh = parts.find((p) => p.type === 'hour')?.value || '09';
+  const mm = parts.find((p) => p.type === 'minute')?.value || '00';
+  return `${hh.padStart(2, '0')}.${mm.padStart(2, '0')} WIB`;
 }
 
 export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
@@ -59,6 +97,7 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
   selectedRecordIdExternal,
   onChangeSelectedRecordId,
   onSaveSurveyEntry,
+  onInspectPrintRecord,
 }) => {
   const [internalFormCode, setInternalFormCode] = useState<PtspFormCode>(
     workspaceRole === 'officer' ? 'formulir_2' : 'formulir_1'
@@ -69,14 +108,33 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
     onChangeFormCode?.(code);
   };
   const [internalRecordId, setInternalRecordId] = useState<string>(
-    workspaceRole === 'officer' ? records[0]?.id || 'NEW_DRAFT' : 'NEW_DRAFT'
+    workspaceRole === 'officer' ? '' : 'NEW_DRAFT'
   );
   const selectedRecordId = selectedRecordIdExternal ?? internalRecordId;
   const setSelectedRecordId = (id: string) => {
     setInternalRecordId(id);
     onChangeSelectedRecordId?.(id);
   };
+  const [recordPickerQuery, setRecordPickerQuery] = useState('');
   const [noticeText, setNoticeText] = useState<string | null>(null);
+  const [lastSubmittedApplicantRecord, setLastSubmittedApplicantRecord] =
+    useState<PtspRecord | null>(null);
+  const [copiedReceiptNumber, setCopiedReceiptNumber] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [savingMessage, setSavingMessage] = useState<string>(
+    'Menyimpan data ke sistem PTSP...'
+  );
+  const [featureActionText, setFeatureActionText] = useState<string | null>(
+    null
+  );
+
+  const runFeatureAction = (label: string, fn: () => void) => {
+    setFeatureActionText(label);
+    fn();
+    window.setTimeout(() => {
+      setFeatureActionText(null);
+    }, 350);
+  };
 
   const isRegNumberAlreadyUsed = (
     candidateReg: string,
@@ -121,61 +179,88 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
     return candidate;
   }, [records]);
 
-  const createEmptyDraft = (customRegNumber?: string): PtspRecord => ({
-    id: `PTSP-2026-${String(records.length + 1).padStart(3, '0')}`,
-    createdAt: new Date().toISOString(),
-    registrationNumber: customRegNumber || nextRegNumber,
-    dayAndDate: 'Senin, 9 November 2026',
-    fullName: '',
-    nikOrIdentity: '',
-    institution: '',
-    position: '',
-    address: '',
-    phoneWhatsapp: '',
-    email: '',
-    serviceTypes: ['ppid'],
-    serviceOtherText: '',
-    purposeSummary: '',
-    supportingDocTypes: ['fotokopi_identitas'],
-    supportingDocOtherText: '',
-    receivedDate: '9 November 2026',
-    receivedTime: '09.00 WIB',
-    ptspOfficerName: authenticatedOfficer?.fullName || 'Rina Kartika, S.I.P.',
-    verificationChecks: ['identitas_diperiksa', 'formulir_diisi'],
-    verificationNotes: '',
-    dispositionTargets: ['ppid_bawaslu'],
-    dispositionOtherText: '',
-    dispositionNotes: '',
-    dispositionReceiverName: '',
-    initialStatus: 'diterima',
-    receiptRemarks: '',
-    receiptDateText: '9 November 2026',
-    handlingUnit: 'PPID Bawaslu Kabupaten Subang',
-    forwardedDate: '9 November 2026',
-    personInCharge: '',
-    completionDate: '',
-    completionStatus: 'menunggu_verifikasi',
-    followUpResult: '',
-    notesToApplicant: '',
-    unitOfficerName: '',
-    surveyDate: '9 November 2026',
-    surveyScores: {
-      q1_prosedur: 4,
-      q2_persyaratan: 4,
-      q3_kecepatan: 4,
-      q4_kompetensi: 4,
-      q5_sikap: 4,
-      q6_kesesuaian: 4,
-      q7_sarana: 4,
-      q8_pengaduan: 4,
-    },
-    surveyFeedback: '',
-    overallSatisfaction: 'sangat_puas',
-  });
+  const createEmptyDraft = (
+    customRegNumber?: string,
+    nowDate: Date = new Date()
+  ): PtspRecord => {
+    const fullDayDate = formatIndonesianDayDate(nowDate);
+    const dateOnly = formatIndonesianDateOnly(nowDate);
+    const timeWib = formatWibTime(nowDate);
+
+    return {
+      id: `PTSP-2026-${String(records.length + 1).padStart(3, '0')}`,
+      createdAt: nowDate.toISOString(),
+      registrationNumber: customRegNumber || nextRegNumber,
+      dayAndDate: fullDayDate,
+      fullName: '',
+      nikOrIdentity: '',
+      institution: '',
+      position: '',
+      address: '',
+      phoneWhatsapp: '',
+      email: '',
+      serviceTypes: ['ppid'],
+      serviceOtherText: '',
+      purposeSummary: '',
+      supportingDocTypes: ['fotokopi_identitas'],
+      supportingDocOtherText: '',
+      receivedDate: dateOnly,
+      receivedTime: timeWib,
+      ptspOfficerName: authenticatedOfficer?.fullName || 'Rina Kartika, S.I.P.',
+      verificationChecks: ['identitas_diperiksa', 'formulir_diisi'],
+      verificationNotes: '',
+      dispositionTargets: ['ppid_bawaslu'],
+      dispositionOtherText: '',
+      dispositionNotes: '',
+      dispositionReceiverName: '',
+      initialStatus: 'diterima',
+      receiptRemarks: '',
+      receiptDateText: dateOnly,
+      handlingUnit: 'PPID Bawaslu Kabupaten Subang',
+      forwardedDate: dateOnly,
+      personInCharge: '',
+      completionDate: '',
+      completionStatus: 'menunggu_verifikasi',
+      followUpResult: '',
+      notesToApplicant: '',
+      unitOfficerName: '',
+      surveyDate: dateOnly,
+      surveyScores: {
+        q1_prosedur: 4,
+        q2_persyaratan: 4,
+        q3_kecepatan: 4,
+        q4_kompetensi: 4,
+        q5_sikap: 4,
+        q6_kesesuaian: 4,
+        q7_sarana: 4,
+        q8_pengaduan: 4,
+      },
+      surveyFeedback: '',
+      overallSatisfaction: 'sangat_puas',
+    };
+  };
 
   const [draftRecord, setDraftRecord] = useState<PtspRecord>(() =>
     createEmptyDraft()
   );
+
+  // Keep draft registration time & date synchronized with real-time WIB clock
+  useEffect(() => {
+    const syncClock = () => {
+      const now = new Date();
+      setDraftRecord((prev) => ({
+        ...prev,
+        dayAndDate: formatIndonesianDayDate(now),
+        receivedDate: formatIndonesianDateOnly(now),
+        receivedTime: formatWibTime(now),
+        receiptDateText: formatIndonesianDateOnly(now),
+        forwardedDate: formatIndonesianDateOnly(now),
+        surveyDate: formatIndonesianDateOnly(now),
+      }));
+    };
+    const timer = setInterval(syncClock, 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   const effectiveSelectedId =
     workspaceRole === 'applicant' ? 'NEW_DRAFT' : selectedRecordId;
@@ -222,126 +307,180 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
 
   const handleSaveFormulir1 = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
     if (!currentRecord.fullName.trim()) {
       setNoticeText('Mohon isi Nama Lengkap Pemohon pada Pendaftaran Pelayanan PTSP.');
       return;
     }
-    if (effectiveSelectedId === 'NEW_DRAFT') {
-      const syncedRegNumber = isRegNumberAlreadyUsed(
-        currentRecord.registrationNumber,
-        records
-      )
-        ? nextRegNumber
-        : currentRecord.registrationNumber;
 
-      const savedRec: PtspRecord = {
-        ...currentRecord,
-        id: `PTSP-2026-${String(records.length + 1).padStart(3, '0')}`,
-        registrationNumber: syncedRegNumber,
-        createdAt: new Date().toISOString(),
-      };
-      onSaveNewRecord(savedRec);
+    setNoticeText(null);
+    setSavingMessage('Menyimpan Pendaftaran Pelayanan PTSP...');
+    setIsSaving(true);
 
-      if (workspaceRole === 'applicant') {
-        const updatedList = [savedRec, ...records];
-        const roman = getRomanMonth(new Date().getMonth() + 1);
-        let maxSeq = updatedList.length;
-        for (const r of updatedList) {
-          const m = r.registrationNumber.trim().match(/^(\d+)/);
-          if (m) {
-            const p = parseInt(m[1], 10);
-            if (!Number.isNaN(p) && p > maxSeq) maxSeq = p;
+    setTimeout(() => {
+      if (effectiveSelectedId === 'NEW_DRAFT') {
+        const submitNow = new Date();
+        const submitDayDate = formatIndonesianDayDate(submitNow);
+        const submitDateOnly = formatIndonesianDateOnly(submitNow);
+        const submitTimeWib = formatWibTime(submitNow);
+
+        const syncedRegNumber = isRegNumberAlreadyUsed(
+          currentRecord.registrationNumber,
+          records
+        )
+          ? nextRegNumber
+          : currentRecord.registrationNumber;
+
+        const savedRec: PtspRecord = {
+          ...currentRecord,
+          id: `PTSP-2026-${String(records.length + 1).padStart(3, '0')}`,
+          registrationNumber: syncedRegNumber,
+          createdAt: submitNow.toISOString(),
+          dayAndDate: currentRecord.dayAndDate.trim() || submitDayDate,
+          receivedDate: submitDateOnly,
+          receivedTime: submitTimeWib,
+          receiptDateText: submitDateOnly,
+          forwardedDate: submitDateOnly,
+        };
+        onSaveNewRecord(savedRec);
+
+        if (workspaceRole === 'applicant') {
+          setLastSubmittedApplicantRecord(savedRec);
+          const updatedList = [savedRec, ...records];
+          const roman = getRomanMonth(submitNow.getMonth() + 1);
+          let maxSeq = updatedList.length;
+          for (const r of updatedList) {
+            const m = r.registrationNumber.trim().match(/^(\d+)/);
+            if (m) {
+              const p = parseInt(m[1], 10);
+              if (!Number.isNaN(p) && p > maxSeq) maxSeq = p;
+            }
           }
+          const nextAvailable = `${String(maxSeq + 1).padStart(3, '0')}/PTSP/686138/${roman}/2026`;
+          setDraftRecord(createEmptyDraft(nextAvailable, submitNow));
+          setSelectedRecordId('NEW_DRAFT');
+        } else {
+          setSelectedRecordId(savedRec.id);
         }
-        const nextAvailable = `${String(maxSeq + 1).padStart(3, '0')}/PTSP/686138/${roman}/2026`;
-        setDraftRecord(createEmptyDraft(nextAvailable));
-        setSelectedRecordId('NEW_DRAFT');
-      } else {
-        setSelectedRecordId(savedRec.id);
-      }
 
-      setNoticeText(
-        `Pendaftaran Pelayanan PTSP (${savedRec.registrationNumber}) berhasil disimpan ke Register Harian PTSP. Nomor registrasi otomatis diperbarui ke nomor berikutnya.`
-      );
-    } else {
-      onUpdateRecord(currentRecord);
-      setNoticeText(
-        `Perubahan Pendaftaran Pelayanan PTSP (${currentRecord.registrationNumber}) berhasil disimpan.`
-      );
-    }
-    setTimeout(() => setNoticeText(null), 4000);
+        setIsSaving(false);
+        setNoticeText(
+          `Pendaftaran Pelayanan PTSP (${savedRec.registrationNumber}) berhasil disimpan pada pukul ${submitTimeWib} (${submitDateOnly}) dan langsung tersinkronisasi ke Database Supabase & Register Harian PTSP.`
+        );
+      } else {
+        onUpdateRecord(currentRecord);
+        setIsSaving(false);
+        setNoticeText(
+          `Perubahan Pendaftaran Pelayanan PTSP (${currentRecord.registrationNumber}) berhasil disimpan.`
+        );
+      }
+      setTimeout(() => setNoticeText(null), 5000);
+    }, 650);
   };
 
   const handleSaveOtherForm = (e: React.FormEvent, formLabel: string) => {
     e.preventDefault();
-    if (effectiveSelectedId === 'NEW_DRAFT') {
-      const syncedRegNumber = isRegNumberAlreadyUsed(
-        currentRecord.registrationNumber,
-        records
-      )
-        ? nextRegNumber
-        : currentRecord.registrationNumber;
+    if (isSaving) return;
 
-      const savedRec: PtspRecord = {
+    setNoticeText(null);
+    setSavingMessage(`Menyimpan ${formLabel}...`);
+    setIsSaving(true);
+
+    setTimeout(() => {
+      const officerFullName =
+        currentRecord.ptspOfficerName.trim() ||
+        authenticatedOfficer?.fullName ||
+        'Rina Kartika, S.I.P.';
+
+      const recordToSave: PtspRecord = {
         ...currentRecord,
-        id: `PTSP-2026-${String(records.length + 1).padStart(3, '0')}`,
-        registrationNumber: syncedRegNumber,
-        createdAt: new Date().toISOString(),
+        ptspOfficerName: officerFullName,
+        completionStatus:
+          activeFormCode === 'formulir_2' &&
+          currentRecord.completionStatus === 'menunggu_verifikasi'
+            ? 'dalam_proses'
+            : currentRecord.completionStatus,
       };
-      onSaveNewRecord(savedRec);
-      if (workspaceRole === 'officer') {
-        setSelectedRecordId(savedRec.id);
+
+      if (effectiveSelectedId === 'NEW_DRAFT') {
+        const syncedRegNumber = isRegNumberAlreadyUsed(
+          recordToSave.registrationNumber,
+          records
+        )
+          ? nextRegNumber
+          : recordToSave.registrationNumber;
+
+        const savedRec: PtspRecord = {
+          ...recordToSave,
+          id: `PTSP-2026-${String(records.length + 1).padStart(3, '0')}`,
+          registrationNumber: syncedRegNumber,
+          createdAt: new Date().toISOString(),
+        };
+        onSaveNewRecord(savedRec);
+        if (workspaceRole === 'officer') {
+          setSelectedRecordId(savedRec.id);
+        }
+      } else {
+        onUpdateRecord(recordToSave);
       }
-    } else {
-      onUpdateRecord(currentRecord);
-    }
-    setNoticeText(
-      `Data ${formLabel} (${currentRecord.registrationNumber}) berhasil disimpan.`
-    );
-    setTimeout(() => setNoticeText(null), 4000);
+      setIsSaving(false);
+      setNoticeText(
+        `Data ${formLabel} (${recordToSave.registrationNumber}) berhasil disimpan dan tersinkronisasi ke Database Supabase.`
+      );
+      setTimeout(() => setNoticeText(null), 4500);
+    }, 650);
   };
 
   const handleSaveSurvey = (e: React.FormEvent) => {
     e.preventDefault();
-    const newSurvey: PtspSurveyEntry = {
-      id: `SKM-2026-${Date.now().toString().slice(-4)}`,
-      createdAt: new Date().toISOString(),
-      respondentName:
-        currentRecord.fullName.trim() || 'Responden Masyarakat',
-      surveyDate: currentRecord.surveyDate || '9 November 2026',
-      serviceType: currentRecord.serviceTypes[0] || 'ppid',
-      surveyScores: { ...currentRecord.surveyScores },
-      surveyFeedback: currentRecord.surveyFeedback.trim(),
-      overallSatisfaction: currentRecord.overallSatisfaction,
-    };
+    if (isSaving) return;
 
-    onSaveSurveyEntry?.(newSurvey);
+    setNoticeText(null);
+    setSavingMessage('Mengirim Penilaian Survei Kepuasan Masyarakat...');
+    setIsSaving(true);
 
-    if (effectiveSelectedId === 'NEW_DRAFT') {
-      setDraftRecord((prev) => ({
-        ...prev,
-        fullName: '',
-        surveyFeedback: '',
-        overallSatisfaction: 'sangat_puas',
-        surveyScores: {
-          q1_prosedur: 4,
-          q2_persyaratan: 4,
-          q3_kecepatan: 4,
-          q4_kompetensi: 4,
-          q5_sikap: 4,
-          q6_kesesuaian: 4,
-          q7_sarana: 4,
-          q8_pengaduan: 4,
-        },
-      }));
-    } else {
-      onUpdateRecord(currentRecord);
-    }
+    setTimeout(() => {
+      const newSurvey: PtspSurveyEntry = {
+        id: `SKM-2026-${Date.now().toString().slice(-4)}`,
+        createdAt: new Date().toISOString(),
+        respondentName:
+          currentRecord.fullName.trim() || 'Responden Masyarakat',
+        surveyDate: currentRecord.surveyDate || formatIndonesianDateOnly(new Date()),
+        serviceType: currentRecord.serviceTypes[0] || 'ppid',
+        surveyScores: { ...currentRecord.surveyScores },
+        surveyFeedback: currentRecord.surveyFeedback.trim(),
+        overallSatisfaction: currentRecord.overallSatisfaction,
+      };
 
-    setNoticeText(
-      'Terima kasih! Penilaian Survei Kepuasan Masyarakat berhasil dikirim dan telah ditambahkan ke Indeks Kinerja Sistem pada Dashboard Pelayanan PTSP.'
-    );
-    setTimeout(() => setNoticeText(null), 4500);
+      onSaveSurveyEntry?.(newSurvey);
+
+      if (effectiveSelectedId === 'NEW_DRAFT') {
+        setDraftRecord((prev) => ({
+          ...prev,
+          fullName: '',
+          surveyFeedback: '',
+          overallSatisfaction: 'sangat_puas',
+          surveyScores: {
+            q1_prosedur: 4,
+            q2_persyaratan: 4,
+            q3_kecepatan: 4,
+            q4_kompetensi: 4,
+            q5_sikap: 4,
+            q6_kesesuaian: 4,
+            q7_sarana: 4,
+            q8_pengaduan: 4,
+          },
+        }));
+      } else {
+        onUpdateRecord(currentRecord);
+      }
+
+      setIsSaving(false);
+      setNoticeText(
+        'Terima kasih! Penilaian Survei Kepuasan Masyarakat berhasil dikirim dan telah ditambahkan ke Indeks Kinerja Sistem pada Dashboard Pelayanan PTSP.'
+      );
+      setTimeout(() => setNoticeText(null), 4500);
+    }, 650);
   };
 
   const exportPtspRegisterCsv = () => {
@@ -390,6 +529,33 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
   const isOfficerLocked =
     Boolean(activeFormMeta.officerOnlyEdit) && !authenticatedOfficer;
 
+  const selectedOfficerRecord = useMemo(
+    () => records.find((r) => r.id === selectedRecordId) || null,
+    [records, selectedRecordId]
+  );
+
+  const isOfficerRecordRequiredForm =
+    workspaceRole === 'officer' &&
+    (activeFormCode === 'formulir_2' ||
+      activeFormCode === 'formulir_3' ||
+      activeFormCode === 'formulir_4');
+
+  const mustSelectRecordFirst =
+    isOfficerRecordRequiredForm && !selectedOfficerRecord;
+
+  const filteredPickerRecords = useMemo(() => {
+    const q = recordPickerQuery.trim().toLowerCase();
+    if (!q) return records;
+    return records.filter(
+      (r) =>
+        r.registrationNumber.toLowerCase().includes(q) ||
+        r.fullName.toLowerCase().includes(q) ||
+        r.nikOrIdentity.toLowerCase().includes(q) ||
+        r.institution.toLowerCase().includes(q) ||
+        r.purposeSummary.toLowerCase().includes(q)
+    );
+  }, [records, recordPickerQuery]);
+
   return (
     <div className="space-y-6">
       {/* RECORD SELECTOR & ACTION TOOLBAR FOR PTSP FORMS */}
@@ -401,50 +567,80 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
                 {activeFormMeta.fullTitle}
               </span>
               <span className="text-slate-400">·</span>
-              <span className="font-mono text-red-900 bg-amber-100/80 border border-amber-300/70 px-2.5 py-0.5 rounded-md font-bold">
-                {currentRecord.registrationNumber}
-              </span>
+              {activeFormCode === 'formulir_lampiran' ? (
+                <span className="font-mono text-red-900 bg-amber-100/80 border border-amber-300/70 px-2.5 py-0.5 rounded-md font-bold">
+                  Register Harian PTSP ({records.length} Berkas)
+                </span>
+              ) : mustSelectRecordFirst ? (
+                <span className="font-semibold text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-0.5 rounded-md">
+                  Pilih Berkas Terlebih Dahulu
+                </span>
+              ) : (
+                <span className="font-mono text-red-900 bg-amber-100/80 border border-amber-300/70 px-2.5 py-0.5 rounded-md font-bold">
+                  {currentRecord.registrationNumber}
+                </span>
+              )}
             </div>
 
-            {/* Record Selector (Only for Officer Desk) & Actions */}
+            {/* Record Selector (Only for Officer Desk on Formulir 2, 3, 4) & Actions */}
             <div className="flex flex-wrap items-center gap-2.5">
-              {workspaceRole === 'officer' && (
-                <>
-                  <select
-                    value={selectedRecordId}
-                    onChange={(e) => setSelectedRecordId(e.target.value)}
-                    className="px-3 py-2 text-xs font-medium border border-stone-300 rounded-lg bg-white text-slate-800 focus:outline-none focus:border-red-800"
-                  >
-                    <option value="NEW_DRAFT">
-                      + Permohonan Baru ({nextRegNumber})
-                    </option>
-                    {records.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.registrationNumber} — {r.fullName || 'Tanpa Nama'}
+              {workspaceRole === 'officer' &&
+                activeFormCode !== 'formulir_lampiran' && (
+                  <>
+                    <select
+                      value={selectedOfficerRecord ? selectedRecordId : ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        runFeatureAction(
+                          val
+                            ? 'Memuat Berkas Permohonan'
+                            : 'Menampilkan Daftar Pilihan Berkas',
+                          () => {
+                            setSelectedRecordId(val);
+                          }
+                        );
+                      }}
+                      className="px-3 py-2 text-xs font-medium border border-stone-300 rounded-lg bg-white text-slate-800 focus:outline-none focus:border-red-800 cursor-pointer"
+                    >
+                      <option value="">
+                        -- Pilih Berkas Permohonan Terlebih Dahulu --
                       </option>
-                    ))}
-                  </select>
+                      {records.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.registrationNumber} — {r.fullName || 'Tanpa Nama'}
+                        </option>
+                      ))}
+                    </select>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDraftRecord(createEmptyDraft(nextRegNumber));
-                      setSelectedRecordId('NEW_DRAFT');
-                      setActiveFormCode('formulir_1');
-                    }}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-red-900 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors whitespace-nowrap shrink-0"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Buat Pendaftaran Baru
-                  </button>
-                </>
-              )}
+                    {selectedOfficerRecord && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          runFeatureAction('Ganti Berkas Permohonan', () => {
+                            setSelectedRecordId('');
+                          })
+                        }
+                        className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-red-900 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                      >
+                        <FolderOpen className="w-3.5 h-3.5" />
+                        Pilih Berkas Lain
+                      </button>
+                    )}
+                  </>
+                )}
 
-              {activeFormCode !== 'formulir_1' && (
+              {activeFormCode !== 'formulir_1' && !mustSelectRecordFirst && (
                 <button
                   type="button"
-                  onClick={() => window.print()}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-red-900 hover:bg-red-950 rounded-lg transition-colors whitespace-nowrap shrink-0"
+                  onClick={() =>
+                    runFeatureAction(
+                      `Menyiapkan Cetak ${activeFormMeta.shortTitle}`,
+                      () => {
+                        window.setTimeout(() => window.print(), 150);
+                      }
+                    )
+                  }
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-red-900 hover:bg-red-950 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   <Printer className="w-3.5 h-3.5 text-amber-300" />
                   Cetak {activeFormMeta.shortTitle}
@@ -466,10 +662,20 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
                   <button
                     key={item.code}
                     type="button"
-                    onClick={() => setActiveFormCode(item.code)}
-                    className={`p-3 rounded-lg border text-left transition-colors flex flex-col justify-between ${
+                    onClick={() =>
+                      runFeatureAction(item.shortTitle, () => {
+                        if (
+                          workspaceRole === 'officer' &&
+                          item.code !== 'formulir_lampiran'
+                        ) {
+                          setSelectedRecordId('');
+                        }
+                        setActiveFormCode(item.code);
+                      })
+                    }
+                    className={`p-3 rounded-lg border text-left transition-all flex flex-col justify-between cursor-pointer ${
                       isSelected
-                        ? 'border-red-800 bg-red-50/70 text-slate-900'
+                        ? 'border-red-800 bg-red-50/70 text-slate-900 shadow-2xs'
                         : 'border-stone-200 hover:border-red-300 text-slate-700 bg-white'
                     }`}
                   >
@@ -498,15 +704,136 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
         </div>
       )}
 
+      {/* ANIMASI KLIK FITUR / MENU DI DALAM WORKSPACE */}
+      {featureActionText && (
+        <div className="no-print fixed bottom-5 left-5 z-50 bg-gradient-to-r from-[#7F1D1D] to-[#4C0519] text-white border border-amber-300/80 rounded-xl px-4 py-2.5 shadow-lg flex items-center gap-2.5 text-xs font-semibold animate-ptsp-fade-in">
+          <Loader2 className="w-4 h-4 text-amber-300 animate-spin shrink-0" />
+          <span>{featureActionText}...</span>
+        </div>
+      )}
+
+      {/* MODAL ANIMASI LOADING SAAT MENYIMPAN DATA */}
+      {isSaving && (
+        <div className="no-print fixed inset-0 z-50 bg-slate-950/45 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white border-2 border-amber-300/90 rounded-2xl px-7 py-6 shadow-xl max-w-sm w-full text-center space-y-3 animate-pulse">
+            <div className="w-14 h-14 mx-auto rounded-full bg-gradient-to-br from-[#7F1D1D] to-[#4C0519] flex items-center justify-center shadow-md border-2 border-amber-300">
+              <Loader2 className="w-7 h-7 text-amber-300 animate-spin" />
+            </div>
+            <div className="text-sm font-bold text-red-950">{savingMessage}</div>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Menyinkronkan data ke Database Supabase &amp; Register Harian PTSP Bawaslu Kabupaten Subang...
+            </p>
+          </div>
+        </div>
+      )}
+
       {noticeText && (
-        <div className="no-print bg-emerald-50 border border-emerald-300 rounded-xl px-5 py-3.5 flex items-center gap-2 text-xs font-medium text-emerald-950">
-          <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+        <div className="no-print bg-emerald-50 border-2 border-emerald-400 rounded-xl px-5 py-3.5 flex items-center gap-2.5 text-xs font-semibold text-emerald-950 shadow-xs transition-all duration-300">
+          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 animate-bounce" />
           <span>{noticeText}</span>
         </div>
       )}
 
+      {/* BUKTI PENDAFTARAN PEMOHON YANG BARU TERKIRIM (DENGAN SALIN RESI & CETAK BUKTI) */}
+      {workspaceRole === 'applicant' &&
+        activeFormCode === 'formulir_1' &&
+        lastSubmittedApplicantRecord && (
+          <div className="no-print max-w-4xl mx-auto w-full bg-gradient-to-r from-emerald-50 via-white to-amber-50/70 border-2 border-emerald-400/90 rounded-xl p-5 shadow-xs space-y-3 animate-ptsp-fade-in">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                  <CheckCircle2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-emerald-950">
+                    Bukti Pendaftaran Pelayanan PTSP Berhasil Diterbitkan
+                  </div>
+                  <p className="text-xs text-slate-600 mt-0.5">
+                    Simpan atau cetak Nomor Registrasi di bawah ini untuk melacak status permohonan Anda pada menu{' '}
+                    <strong>Lacak Status Permohonan</strong>.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLastSubmittedApplicantRecord(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 rounded-lg"
+                aria-label="Tutup bukti pendaftaran"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-white border border-emerald-200 rounded-lg p-3.5 text-xs">
+              <div>
+                <div className="text-slate-500">Nomor Registrasi / Resi</div>
+                <div className="font-mono font-bold text-red-900 text-sm mt-0.5">
+                  {lastSubmittedApplicantRecord.registrationNumber}
+                </div>
+              </div>
+              <div>
+                <div className="text-slate-500">Nama Pemohon</div>
+                <div className="font-bold text-slate-900 mt-0.5">
+                  {lastSubmittedApplicantRecord.fullName}
+                </div>
+              </div>
+              <div>
+                <div className="text-slate-500">Waktu Pendaftaran</div>
+                <div className="font-mono font-semibold text-slate-800 mt-0.5">
+                  {lastSubmittedApplicantRecord.receivedDate} ·{' '}
+                  {lastSubmittedApplicantRecord.receivedTime}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  if (navigator.clipboard?.writeText) {
+                    navigator.clipboard
+                      .writeText(lastSubmittedApplicantRecord.registrationNumber)
+                      .catch(() => {});
+                  }
+                  setCopiedReceiptNumber(true);
+                  window.setTimeout(() => setCopiedReceiptNumber(false), 1800);
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-white border border-stone-300 hover:border-red-800 text-slate-800 transition-colors cursor-pointer"
+              >
+                {copiedReceiptNumber ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                    <span className="text-emerald-700">Nomor Resi Tersalin!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-slate-600" />
+                    <span>Salin Nomor Registrasi</span>
+                  </>
+                )}
+              </button>
+
+              {onInspectPrintRecord && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onInspectPrintRecord(
+                      lastSubmittedApplicantRecord,
+                      'formulir_1'
+                    )
+                  }
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold text-white bg-gradient-to-r from-[#7F1D1D] to-[#58111A] hover:from-red-900 hover:to-red-950 transition-colors cursor-pointer shadow-2xs"
+                >
+                  <FileText className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Lihat &amp; Cetak Bukti Pendaftaran</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
       {/* MAIN WORKSPACE: INTERACTIVE FORM */}
-      <div className="grid grid-cols-1 gap-8 items-start">
+      <div key={`${activeFormCode}-${selectedRecordId}`} className="grid grid-cols-1 gap-8 items-start animate-ptsp-fade-in">
         {/* INTERACTIVE FORM FOR SELECTED FORMULIR */}
         <div className="no-print max-w-4xl mx-auto w-full bg-white border border-stone-200/90 rounded-xl overflow-hidden shadow-2xs">
           {/* Header of current active form */}
@@ -523,8 +850,12 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
               activeFormCode === 'formulir_1' && (
                 <button
                   type="button"
-                  onClick={() => setDraftRecord(createEmptyDraft())}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-amber-100 bg-white/10 hover:bg-white/20 border border-white/20 transition-colors whitespace-nowrap shrink-0"
+                  onClick={() =>
+                    runFeatureAction('Mereset Isian Formulir', () => {
+                      setDraftRecord(createEmptyDraft());
+                    })
+                  }
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-amber-100 bg-white/10 hover:bg-white/20 border border-white/20 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5 text-amber-300" />
                   Reset Isian
@@ -603,16 +934,21 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      2. Hari / Tanggal
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-semibold text-slate-700">
+                        2. Hari / Tanggal
+                      </label>
+                      <span className="text-[10.5px] font-mono font-semibold text-emerald-700">
+                        Jam Daftar: {currentRecord.receivedTime}
+                      </span>
+                    </div>
                     <input
                       type="text"
                       value={currentRecord.dayAndDate}
                       onChange={(e) =>
                         updateCurrentRecordField('dayAndDate', e.target.value)
                       }
-                      placeholder="Senin, 9 November 2026"
+                      placeholder="Rabu, 11 November 2026"
                       className="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-red-800"
                     />
                   </div>
@@ -890,21 +1226,151 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
               <div className="pt-2 flex justify-end gap-3">
                 <button
                   type="submit"
-                  className="inline-flex items-center gap-1.5 px-5 py-2.5 text-xs font-bold text-white bg-gradient-to-r from-[#7F1D1D] to-[#58111A] hover:from-red-900 hover:to-red-950 rounded-lg shadow-xs"
+                  disabled={isSaving}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-bold text-white bg-gradient-to-r from-[#7F1D1D] to-[#58111A] hover:from-red-900 hover:to-red-950 disabled:opacity-70 rounded-lg shadow-xs transition-all cursor-pointer"
                 >
-                  <Save className="w-4 h-4 text-amber-300" />
-                  Simpan Pendaftaran PTSP
+                  {isSaving ? (
+                    <>
+                      <Loader2 className="w-4 h-4 text-amber-300 animate-spin" />
+                      <span>Menyimpan Pendaftaran...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4 text-amber-300" />
+                      <span>Simpan Pendaftaran PTSP</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
           )}
 
-          {/* 2. LEMBAR PENERIMAAN DAN VERIFIKASI PETUGAS PTSP */}
-          {activeFormCode === 'formulir_2' && (
-            <form
-              onSubmit={(e) => handleSaveOtherForm(e, 'Verifikasi Petugas')}
-              className="space-y-6"
-            >
+            {/* GATE: PILIH BERKAS PERMOHONAN TERLEBIH DAHULU UNTUK VERIFIKASI, TANDA TERIMA, ATAU MONITORING */}
+            {mustSelectRecordFirst && (
+              <div className="space-y-5">
+                <div className="p-4 rounded-xl bg-amber-50/90 border border-amber-300/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="text-xs font-bold text-red-950">
+                      Pilih Berkas Permohonan Terlebih Dahulu
+                    </div>
+                    <p className="text-xs text-slate-700 leading-relaxed">
+                      Silakan pilih salah satu berkas permohonan di bawah ini untuk membuka{' '}
+                      <strong>{activeFormMeta.fullTitle}</strong>.
+                    </p>
+                  </div>
+                  <span className="text-xs font-mono font-bold text-amber-950 bg-white border border-amber-300 px-3 py-1.5 rounded-lg shrink-0">
+                    {records.length} Berkas Terdaftar
+                  </span>
+                </div>
+
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={recordPickerQuery}
+                    onChange={(e) => setRecordPickerQuery(e.target.value)}
+                    placeholder="Cari Nomor Registrasi, Nama Pemohon, NIK, atau Jenis Layanan..."
+                    className="w-full pl-10 pr-4 py-2.5 text-xs border border-stone-300 rounded-lg focus:outline-none focus:border-red-800"
+                  />
+                </div>
+
+                <div className="w-full overflow-hidden border border-stone-200 rounded-lg">
+                  <table className="w-full table-fixed text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-red-50/75 border-b border-red-200/80 text-[11px] font-bold uppercase text-red-950">
+                        <th className="py-2.5 px-3 w-[24%]">No. Registrasi &amp; Tanggal</th>
+                        <th className="py-2.5 px-3 w-[23%]">Pemohon &amp; Instansi</th>
+                        <th className="py-2.5 px-3 w-[23%]">Jenis Layanan</th>
+                        <th className="py-2.5 px-3 w-[16%]">Status</th>
+                        <th className="py-2.5 px-3 w-[14%] text-right">Tindakan</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-200">
+                      {filteredPickerRecords.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            className="py-8 text-center text-slate-500"
+                          >
+                            Tidak ada berkas permohonan yang sesuai dengan pencarian.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredPickerRecords.map((r) => (
+                          <tr
+                            key={r.id}
+                            className="hover:bg-amber-50/50 transition-colors"
+                          >
+                            <td className="py-3 px-3 font-mono tabular-nums break-all align-top">
+                              <div className="font-bold text-red-900">
+                                {r.registrationNumber}
+                              </div>
+                              <div className="text-[11px] text-slate-500 mt-0.5 break-normal">
+                                {r.receivedDate || r.dayAndDate}
+                              </div>
+                            </td>
+                            <td className="py-3 px-3 break-words align-top">
+                              <div className="font-semibold text-slate-900">
+                                {r.fullName}
+                              </div>
+                              <div className="text-[11px] text-slate-500">
+                                {r.institution || 'Masyarakat Umum'}
+                              </div>
+                            </td>
+                            <td className="py-3 px-3 break-words align-top">
+                              {r.serviceTypes
+                                .map((s) => PTSP_SERVICE_TYPE_LABELS[s])
+                                .join(', ')}
+                            </td>
+                            <td className="py-3 px-3 break-words align-top">
+                              <span
+                                className={`font-semibold ${
+                                  r.completionStatus === 'selesai'
+                                    ? 'text-emerald-700'
+                                    : r.completionStatus ===
+                                      'menunggu_verifikasi'
+                                    ? 'text-amber-700'
+                                    : 'text-blue-700'
+                                }`}
+                              >
+                                {
+                                  PTSP_COMPLETION_STATUS_LABELS[
+                                    r.completionStatus
+                                  ]
+                                }
+                              </span>
+                            </td>
+                            <td className="py-3 px-3 text-right align-top">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  runFeatureAction(
+                                    `Membuka Berkas ${r.registrationNumber}`,
+                                    () => {
+                                      setSelectedRecordId(r.id);
+                                    }
+                                  )
+                                }
+                                className="px-3 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-[#7F1D1D] to-[#58111A] hover:from-red-900 hover:to-red-950 rounded-md shadow-2xs cursor-pointer whitespace-nowrap"
+                              >
+                                Pilih Berkas
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* 2. LEMBAR PENERIMAAN DAN VERIFIKASI PETUGAS PTSP */}
+            {!mustSelectRecordFirst && activeFormCode === 'formulir_2' && (
+              <form
+                onSubmit={(e) => handleSaveOtherForm(e, 'Verifikasi Petugas')}
+                className="space-y-6"
+              >
               <fieldset disabled={isOfficerLocked} className="space-y-6">
                 <div className="space-y-4">
                   <h4 className="text-sm font-bold text-slate-900">
@@ -1145,10 +1611,20 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
                 <div className="pt-2 flex justify-end gap-3">
                   <button
                     type="submit"
-                    className="inline-flex items-center gap-1.5 px-5 py-2.5 text-xs font-semibold text-white bg-red-800 hover:bg-red-900 rounded-lg"
+                    disabled={isSaving}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-red-800 hover:bg-red-900 disabled:opacity-70 rounded-lg transition-all cursor-pointer"
                   >
-                    <Save className="w-4 h-4" />
-                    Simpan Verifikasi Petugas
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="w-4 h-4 text-amber-300 animate-spin" />
+                        <span>Menyimpan Verifikasi...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" />
+                        <span>Simpan Verifikasi Petugas</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </fieldset>
@@ -1156,7 +1632,7 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
           )}
 
           {/* 3. TANDA TERIMA PERMOHONAN PELAYANAN */}
-          {activeFormCode === 'formulir_3' && (
+          {!mustSelectRecordFirst && activeFormCode === 'formulir_3' && (
             <form
               onSubmit={(e) => handleSaveOtherForm(e, 'Tanda Terima Layanan')}
               className="space-y-5"
@@ -1256,10 +1732,20 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
                   </button>
                   <button
                     type="submit"
-                    className="inline-flex items-center gap-1.5 px-5 py-2.5 text-xs font-semibold text-white bg-red-800 hover:bg-red-900 rounded-lg"
+                    disabled={isSaving}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-red-800 hover:bg-red-900 disabled:opacity-70 rounded-lg transition-all cursor-pointer"
                   >
-                    <Save className="w-4 h-4" />
-                    Simpan Tanda Terima
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="w-4 h-4 text-amber-300 animate-spin" />
+                        <span>Menyimpan Tanda Terima...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" />
+                        <span>Simpan Tanda Terima</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </fieldset>
@@ -1267,7 +1753,7 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
           )}
 
           {/* 4. MONITORING DAN PENYELESAIAN PELAYANAN */}
-          {activeFormCode === 'formulir_4' && (
+          {!mustSelectRecordFirst && activeFormCode === 'formulir_4' && (
             <form
               onSubmit={(e) => handleSaveOtherForm(e, 'Monitoring Pelayanan')}
               className="space-y-5"
@@ -1404,10 +1890,20 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
                 <div className="pt-2 flex justify-end gap-3">
                   <button
                     type="submit"
-                    className="inline-flex items-center gap-1.5 px-5 py-2.5 text-xs font-semibold text-white bg-red-800 hover:bg-red-900 rounded-lg"
+                    disabled={isSaving}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-red-800 hover:bg-red-900 disabled:opacity-70 rounded-lg transition-all cursor-pointer"
                   >
-                    <Save className="w-4 h-4" />
-                    Simpan Monitoring Pelayanan
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="w-4 h-4 text-amber-300 animate-spin" />
+                        <span>Menyimpan Monitoring...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" />
+                        <span>Simpan Monitoring Pelayanan</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </fieldset>
@@ -1574,10 +2070,20 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
               <div className="pt-2 flex justify-end gap-3">
                 <button
                   type="submit"
-                  className="inline-flex items-center gap-1.5 px-5 py-2.5 text-xs font-semibold text-white bg-red-800 hover:bg-red-900 rounded-lg"
+                  disabled={isSaving}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-red-800 hover:bg-red-900 disabled:opacity-70 rounded-lg transition-all cursor-pointer"
                 >
-                  <Save className="w-4 h-4" />
-                  Simpan Survei Kepuasan
+                  {isSaving ? (
+                    <>
+                      <Loader2 className="w-4 h-4 text-amber-300 animate-spin" />
+                      <span>Mengirim Penilaian...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      <span>Simpan Survei Kepuasan</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
@@ -1588,68 +2094,113 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
             <div className="space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="text-xs text-slate-600 leading-relaxed">
-                  Daftar seluruh permohonan layanan yang tercatat dalam{' '}
-                  <strong>Format Register Harian PTSP</strong>.
-                  Klik salah satu baris untuk membuka dan menindaklanjuti berkas permohonan pelayanan.
+                  Daftar seluruh permohonan layanan yang tercatat secara detail dalam{' '}
+                  <strong>Format Register Harian PTSP</strong> Bawaslu Kabupaten Subang.
                 </p>
-                <button
-                  type="button"
-                  onClick={exportPtspRegisterCsv}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg whitespace-nowrap shrink-0"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Unduh CSV Register PTSP
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      runFeatureAction('Mengunduh CSV Register PTSP', () => {
+                        exportPtspRegisterCsv();
+                      })
+                    }
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Unduh CSV Register PTSP
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      runFeatureAction('Menyiapkan Cetak Pedoman & Register PTSP', () => {
+                        window.setTimeout(() => window.print(), 150);
+                      })
+                    }
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-red-900 hover:bg-red-950 rounded-lg whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-amber-300" />
+                    Cetak Register &amp; Pedoman
+                  </button>
+                </div>
               </div>
 
               <div className="w-full overflow-hidden border border-stone-200 rounded-lg">
                 <table className="w-full table-fixed text-left border-collapse text-xs">
                   <thead>
                     <tr className="bg-red-50/75 border-b border-red-200/80 text-[11px] font-bold uppercase text-red-950">
-                      <th className="py-2.5 px-3 w-[7%]">No.</th>
-                      <th className="py-2.5 px-3 w-[22%]">No. Registrasi</th>
-                      <th className="py-2.5 px-3 w-[22%]">Pemohon</th>
-                      <th className="py-2.5 px-3 w-[22%]">Jenis Layanan</th>
-                      <th className="py-2.5 px-3 w-[15%]">Status</th>
-                      <th className="py-2.5 px-3 w-[12%] text-right">Buka</th>
+                      <th className="py-2.5 px-3 w-[6%]">No.</th>
+                      <th className="py-2.5 px-3 w-[20%]">No. Registrasi &amp; Waktu</th>
+                      <th className="py-2.5 px-3 w-[20%]">Pemohon &amp; Identitas</th>
+                      <th className="py-2.5 px-3 w-[22%]">Jenis Layanan &amp; Keperluan</th>
+                      <th className="py-2.5 px-3 w-[18%]">Unit Tujuan &amp; Petugas</th>
+                      <th className="py-2.5 px-3 w-[14%]">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-stone-200">
                     {records.map((r, idx) => (
                       <tr key={r.id} className="hover:bg-amber-50/40">
-                        <td className="py-2.5 px-3 font-mono tabular-nums align-top">
+                        <td className="py-3 px-3 font-mono tabular-nums align-top">
                           {idx + 1}
                         </td>
-                        <td className="py-2.5 px-3 font-mono tabular-nums font-bold text-red-900 break-all align-top">
-                          {r.registrationNumber}
+                        <td className="py-3 px-3 font-mono tabular-nums break-all align-top">
+                          <div className="font-bold text-red-900">
+                            {r.registrationNumber}
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5 break-normal">
+                            {r.receivedDate || r.dayAndDate}
+                            {r.receivedTime ? ` · ${r.receivedTime}` : ''}
+                          </div>
                         </td>
-                        <td className="py-2.5 px-3 break-words align-top">
+                        <td className="py-3 px-3 break-words align-top">
                           <div className="font-semibold text-slate-900">
                             {r.fullName}
                           </div>
-                          <div className="text-[11px] text-slate-500">
-                            {r.receivedDate || r.dayAndDate}
+                          <div className="text-[11px] text-slate-600 mt-0.5">
+                            {r.institution || 'Masyarakat Umum'}
+                          </div>
+                          {r.nikOrIdentity && (
+                            <div className="text-[10.5px] font-mono text-slate-400 mt-0.5">
+                              NIK/ID: {r.nikOrIdentity}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 break-words align-top">
+                          <div className="font-medium text-slate-900">
+                            {r.serviceTypes
+                              .map((s) => PTSP_SERVICE_TYPE_LABELS[s])
+                              .join(', ')}
+                          </div>
+                          {r.purposeSummary && (
+                            <div className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">
+                              {r.purposeSummary}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 break-words align-top">
+                          <div className="font-medium text-slate-800">
+                            {r.dispositionTargets
+                              .map((d) => PTSP_DISPOSITION_LABELS[d])
+                              .join(', ') ||
+                              r.handlingUnit ||
+                              '-'}
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            Petugas: {r.ptspOfficerName || '-'}
                           </div>
                         </td>
-                        <td className="py-2.5 px-3 break-words align-top">
-                          {r.serviceTypes
-                            .map((s) => PTSP_SERVICE_TYPE_LABELS[s])
-                            .join(', ')}
-                        </td>
-                        <td className="py-2.5 px-3 break-words align-top">
-                          {PTSP_COMPLETION_STATUS_LABELS[r.completionStatus]}
-                        </td>
-                        <td className="py-2.5 px-3 text-right align-top">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedRecordId(r.id);
-                              setActiveFormCode('formulir_1');
-                            }}
-                            className="px-2.5 py-1 text-xs font-semibold text-red-900 bg-red-50 hover:bg-red-100 border border-red-200/80 rounded"
+                        <td className="py-3 px-3 break-words align-top">
+                          <span
+                            className={`font-semibold ${
+                              r.completionStatus === 'selesai'
+                                ? 'text-emerald-700'
+                                : r.completionStatus === 'menunggu_verifikasi'
+                                ? 'text-amber-700'
+                                : 'text-blue-700'
+                            }`}
                           >
-                            Pilih
-                          </button>
+                            {PTSP_COMPLETION_STATUS_LABELS[r.completionStatus]}
+                          </span>
                         </td>
                       </tr>
                     ))}
@@ -1661,9 +2212,42 @@ export const PtspWorkspace: React.FC<PtspWorkspaceProps> = ({
           </div>
         </div>
 
-        {/* PRINTABLE SHEET (ONLY SHOWN WHEN PRINTING FOR NON-FORMULIR 1) */}
-        {activeFormCode !== 'formulir_1' && (
-          <div className="hidden print:block">
+        {/* OFFICIAL DETAILED PTSP DOCUMENT SHEET (SHOWN ON OFFICER DESK & WHEN PRINTING) */}
+        {activeFormCode !== 'formulir_1' && !mustSelectRecordFirst && (
+          <div
+            className={
+              workspaceRole === 'officer'
+                ? 'block max-w-4xl mx-auto w-full space-y-3 print:max-w-none print:space-y-0'
+                : 'hidden print:block'
+            }
+          >
+            {workspaceRole === 'officer' && (
+              <div className="no-print bg-gradient-to-r from-amber-50 via-white to-red-50/60 border border-amber-300/80 rounded-xl px-5 py-3 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-bold text-red-950">
+                    Pratinjau Dokumen Resmi Detail (Siap Cetak PDF / Kertas)
+                  </div>
+                  <p className="text-[11px] text-slate-600">
+                    Lembar resmi di bawah ini otomatis terisi penuh sesuai data berkas dan langsung tercetak saat tombol Cetak diklik.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    runFeatureAction(
+                      `Menyiapkan Cetak ${activeFormMeta.shortTitle}`,
+                      () => {
+                        window.setTimeout(() => window.print(), 150);
+                      }
+                    )
+                  }
+                  className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-red-950 bg-amber-400 hover:bg-amber-300 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-2xs"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  Cetak Dokumen Detail
+                </button>
+              </div>
+            )}
             <PtspOfficialSheets
               formCode={activeFormCode}
               record={currentRecord}

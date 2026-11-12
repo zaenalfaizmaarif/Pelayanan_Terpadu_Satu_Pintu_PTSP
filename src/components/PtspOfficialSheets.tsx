@@ -1067,28 +1067,28 @@ export const PtspOfficialSheets: React.FC<PtspOfficialSheetsProps> = ({
           <p className="font-bold text-[#2e6da4] mb-2">
             B. Format Register Harian PTSP
           </p>
-          <table className="w-full table-fixed border-collapse border border-black text-[11px]">
+          <table className="w-full table-fixed border-collapse border border-black text-[10.5px]">
             <thead>
               <tr className="bg-[#1e4e79] text-white print:bg-slate-800">
-                <th className="border border-black py-1.5 px-1.5 text-center w-[6%]">
+                <th className="border border-black py-1.5 px-1 text-center w-[5%]">
                   No.
                 </th>
-                <th className="border border-black py-1.5 px-2 text-left w-[13%]">
-                  Tanggal
+                <th className="border border-black py-1.5 px-1.5 text-left w-[14%]">
+                  Tanggal &amp; Jam
                 </th>
-                <th className="border border-black py-1.5 px-2 text-left w-[20%]">
+                <th className="border border-black py-1.5 px-1.5 text-left w-[18%]">
                   No. Registrasi
                 </th>
-                <th className="border border-black py-1.5 px-2 text-left w-[15%]">
-                  Nama Pemohon
+                <th className="border border-black py-1.5 px-1.5 text-left w-[18%]">
+                  Nama Pemohon &amp; Instansi
                 </th>
-                <th className="border border-black py-1.5 px-2 text-left w-[18%]">
-                  Jenis Layanan
+                <th className="border border-black py-1.5 px-1.5 text-left w-[19%]">
+                  Jenis Layanan &amp; Keperluan
                 </th>
-                <th className="border border-black py-1.5 px-2 text-left w-[15%]">
-                  Unit Tujuan
+                <th className="border border-black py-1.5 px-1.5 text-left w-[14%]">
+                  Unit Tujuan &amp; Petugas
                 </th>
-                <th className="border border-black py-1.5 px-2 text-left w-[13%]">
+                <th className="border border-black py-1.5 px-1.5 text-left w-[12%]">
                   Status
                 </th>
               </tr>
@@ -1107,25 +1107,48 @@ export const PtspOfficialSheets: React.FC<PtspOfficialSheetsProps> = ({
                   '-';
                 return (
                   <tr key={r.id}>
-                    <td className="border border-black py-1.5 px-1.5 text-center font-mono tabular-nums align-top">
+                    <td className="border border-black py-1.5 px-1 text-center font-mono tabular-nums align-top">
                       {idx + 1}
                     </td>
-                    <td className="border border-black py-1.5 px-2 break-words align-top">
-                      {r.receivedDate || r.dayAndDate}
+                    <td className="border border-black py-1.5 px-1.5 break-words align-top">
+                      <div>{r.receivedDate || r.dayAndDate}</div>
+                      {r.receivedTime && (
+                        <div className="font-mono text-[9.5px]">
+                          {r.receivedTime}
+                        </div>
+                      )}
                     </td>
-                    <td className="border border-black py-1.5 px-2 font-mono tabular-nums break-all align-top">
+                    <td className="border border-black py-1.5 px-1.5 font-mono tabular-nums break-all align-top font-semibold">
                       {r.registrationNumber}
                     </td>
-                    <td className="border border-black py-1.5 px-2 break-words align-top">
-                      {r.fullName}
+                    <td className="border border-black py-1.5 px-1.5 break-words align-top">
+                      <div className="font-bold">{r.fullName}</div>
+                      <div className="text-[10px]">
+                        {r.institution || 'Masyarakat Umum'}
+                      </div>
+                      {r.nikOrIdentity && (
+                        <div className="font-mono text-[9.5px]">
+                          NIK: {r.nikOrIdentity}
+                        </div>
+                      )}
                     </td>
-                    <td className="border border-black py-1.5 px-2 break-words align-top">
-                      {srvLabel}
+                    <td className="border border-black py-1.5 px-1.5 break-words align-top">
+                      <div className="font-semibold">{srvLabel}</div>
+                      {r.purposeSummary && (
+                        <div className="text-[10px] mt-0.5">
+                          {r.purposeSummary}
+                        </div>
+                      )}
                     </td>
-                    <td className="border border-black py-1.5 px-2 break-words align-top">
-                      {unitLabel}
+                    <td className="border border-black py-1.5 px-1.5 break-words align-top">
+                      <div>{unitLabel}</div>
+                      {r.ptspOfficerName && (
+                        <div className="text-[9.5px] mt-0.5">
+                          Petugas: {r.ptspOfficerName}
+                        </div>
+                      )}
                     </td>
-                    <td className="border border-black py-1.5 px-2 break-words align-top">
+                    <td className="border border-black py-1.5 px-1.5 break-words align-top font-semibold">
                       {PTSP_COMPLETION_STATUS_LABELS[r.completionStatus]}
                     </td>
                   </tr>
