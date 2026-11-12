@@ -17,6 +17,14 @@ import { PtspOfficialSheets } from './components/PtspOfficialSheets';
 import { ApplicationTrackerCard } from './components/ApplicationTrackerCard';
 import { BAWASLU_LOGO_DATA_URI } from './assets/bawasluLogo';
 import {
+  verifyOfficerSession,
+  logoutOfficerSession,
+  fetchPtspRecordsCloud,
+  upsertPtspRecordCloud,
+  fetchPtspSurveysCloud,
+  upsertPtspSurveyCloud,
+} from './services/ptspCloudService';
+import {
   PtspRecord,
   PtspFormCode,
   PtspSurveyEntry,
@@ -113,20 +121,12 @@ export default function App() {
       setAuthenticatedOfficer(null);
       return;
     }
-    fetch('/api/auth/me', {
-      headers: {
-        Authorization: `Bearer ${authToken}`,
-      },
-    })
-      .then((res) => {
-        if (!res.ok) {
+    verifyOfficerSession(authToken)
+      .then((officer) => {
+        if (officer) {
+          setAuthenticatedOfficer(officer);
+        } else {
           throw new Error('Unauthorized');
-        }
-        return res.json();
-      })
-      .then((data) => {
-        if (data?.officer) {
-          setAuthenticatedOfficer(data.officer);
         }
       })
       .catch(() => {
@@ -140,25 +140,23 @@ export default function App() {
       });
   }, [authToken]);
 
-  // Real-time sync of records & surveys from server + cross-tab localStorage listener
+  // Real-time sync of records & surveys from server / Supabase Cloud + cross-tab localStorage listener
   useEffect(() => {
     const syncFromServer = () => {
-      fetch('/api/ptsp/records')
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => {
-          if (Array.isArray(data?.records) && data.records.length > 0) {
-            setPtspRecords(data.records);
+      fetchPtspRecordsCloud()
+        .then((records) => {
+          if (Array.isArray(records) && records.length > 0) {
+            setPtspRecords(records);
           }
         })
         .catch(() => {
           // fallback to local state
         });
 
-      fetch('/api/ptsp/surveys')
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => {
-          if (Array.isArray(data?.surveys) && data.surveys.length > 0) {
-            setPtspSurveys(data.surveys);
+      fetchPtspSurveysCloud()
+        .then((surveys) => {
+          if (Array.isArray(surveys) && surveys.length > 0) {
+            setPtspSurveys(surveys);
           }
         })
         .catch(() => {
@@ -229,24 +227,12 @@ export default function App() {
     if (isOfficerPortalView) {
       setSelectedOfficerRecordId(newRec.id);
     }
-    fetch('/api/ptsp/records', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newRec),
-    }).catch(() => {
-      // ignore network error
-    });
+    void upsertPtspRecordCloud(newRec);
   };
 
   const handleSaveNewSurvey = (newSurvey: PtspSurveyEntry) => {
     setPtspSurveys((prev) => [newSurvey, ...prev]);
-    fetch('/api/ptsp/surveys', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newSurvey),
-    }).catch(() => {
-      // ignore network error
-    });
+    void upsertPtspSurveyCloud(newSurvey);
   };
 
   const updateDebounceRef = useRef<Record<string, number>>({});
@@ -264,13 +250,7 @@ export default function App() {
         window.clearTimeout(existingTimer);
       }
       updateDebounceRef.current[updatedRec.id] = window.setTimeout(() => {
-        fetch(`/api/ptsp/records/${encodeURIComponent(updatedRec.id)}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updatedRec),
-        }).catch(() => {
-          // ignore network error
-        });
+        void upsertPtspRecordCloud(updatedRec);
       }, 300);
     }
   };
@@ -286,18 +266,7 @@ export default function App() {
   };
 
   const handleOfficerLogout = async () => {
-    if (authToken) {
-      try {
-        await fetch('/api/auth/logout', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${authToken}`,
-          },
-        });
-      } catch {
-        // ignore network errors
-      }
-    }
+    await logoutOfficerSession(authToken);
     setAuthenticatedOfficer(null);
     setAuthToken('');
     setSelectedOfficerRecordId('');

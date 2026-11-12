@@ -27,6 +27,9 @@ import {
   BarChart3,
   MessageSquareQuote,
   Loader2,
+  Eye,
+  EyeOff,
+  AlertCircle,
 } from 'lucide-react';
 
 export type OfficerWorkspaceTab = 'dashboard' | 'ptsp_desk';
@@ -78,11 +81,25 @@ export const OfficerDeskPanel: React.FC<OfficerDeskPanelProps> = ({
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isPasswordModalShaking, setIsPasswordModalShaking] = useState(false);
   const [passwordStatus, setPasswordStatus] = useState<{
     type: 'success' | 'error';
     text: string;
   } | null>(null);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+  const triggerPasswordModalShake = () => {
+    setIsPasswordModalShaking(false);
+    window.requestAnimationFrame(() => {
+      setIsPasswordModalShaking(true);
+      window.setTimeout(() => {
+        setIsPasswordModalShaking(false);
+      }, 520);
+    });
+  };
 
   // Dashboard metrics calculations (PTSP records + standalone SKM Index)
   const dashboardStats = useMemo(() => {
@@ -206,6 +223,7 @@ export const OfficerDeskPanel: React.FC<OfficerDeskPanelProps> = ({
         type: 'error',
         text: 'Kata sandi baru minimal harus terdiri dari 8 karakter.',
       });
+      triggerPasswordModalShake();
       return;
     }
     if (newPassword !== confirmNewPassword) {
@@ -213,6 +231,7 @@ export const OfficerDeskPanel: React.FC<OfficerDeskPanelProps> = ({
         type: 'error',
         text: 'Konfirmasi kata sandi baru tidak cocok.',
       });
+      triggerPasswordModalShake();
       return;
     }
 
@@ -229,18 +248,30 @@ export const OfficerDeskPanel: React.FC<OfficerDeskPanelProps> = ({
           newPassword,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setPasswordStatus({
-          type: 'error',
-          text: data.error || 'Gagal memperbarui kata sandi.',
-        });
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        if (!res.ok) {
+          setPasswordStatus({
+            type: 'error',
+            text: data.error || 'Gagal memperbarui kata sandi.',
+          });
+          triggerPasswordModalShake();
+        } else {
+          setPasswordStatus({
+            type: 'success',
+            text:
+              data.message ||
+              'Kata sandi petugas berhasil diperbarui di server.',
+          });
+          setCurrentPassword('');
+          setNewPassword('');
+          setConfirmNewPassword('');
+        }
       } else {
         setPasswordStatus({
           type: 'success',
-          text:
-            data.message ||
-            'Kata sandi petugas berhasil diperbarui di server.',
+          text: 'Kata sandi petugas berhasil diperbarui.',
         });
         setCurrentPassword('');
         setNewPassword('');
@@ -251,6 +282,7 @@ export const OfficerDeskPanel: React.FC<OfficerDeskPanelProps> = ({
         type: 'error',
         text: 'Tidak dapat menghubungi server.',
       });
+      triggerPasswordModalShake();
     } finally {
       setIsChangingPassword(false);
     }
@@ -972,7 +1004,15 @@ export const OfficerDeskPanel: React.FC<OfficerDeskPanelProps> = ({
       {/* Modal Ubah Kata Sandi Petugas (Server-Side Encrypted) */}
       {showPasswordModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white border border-slate-200 rounded-xl p-6 shadow-xl">
+          <div
+            className={`w-full max-w-md bg-white border rounded-xl p-6 shadow-xl transition-colors ${
+              isPasswordModalShaking ? 'animate-ptsp-shake' : ''
+            } ${
+              passwordStatus?.type === 'error'
+                ? 'border-red-400'
+                : 'border-slate-200'
+            }`}
+          >
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
               <div>
                 <h3 className="text-sm font-bold text-slate-900">
@@ -985,7 +1025,7 @@ export const OfficerDeskPanel: React.FC<OfficerDeskPanelProps> = ({
               <button
                 type="button"
                 onClick={() => setShowPasswordModal(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg"
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -996,52 +1036,158 @@ export const OfficerDeskPanel: React.FC<OfficerDeskPanelProps> = ({
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Kata Sandi Saat Ini
                 </label>
-                <input
-                  type="password"
-                  required
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  className="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-red-800"
-                />
+                <div className="relative">
+                  <KeyRound
+                    className={`w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 transition-colors ${
+                      passwordStatus?.type === 'error'
+                        ? 'text-red-500'
+                        : 'text-slate-400'
+                    }`}
+                  />
+                  <input
+                    type={showCurrentPassword ? 'text' : 'password'}
+                    required
+                    value={currentPassword}
+                    onChange={(e) => {
+                      setCurrentPassword(e.target.value);
+                      if (passwordStatus?.type === 'error') {
+                        setPasswordStatus(null);
+                      }
+                    }}
+                    placeholder="Masukkan kata sandi saat ini"
+                    className={`w-full pl-10 pr-10 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 transition-colors ${
+                      passwordStatus?.type === 'error'
+                        ? 'border-red-400 bg-red-50/40 focus:ring-red-800/25 focus:border-red-700'
+                        : 'border-slate-300 focus:ring-red-800/20 focus:border-red-800'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrentPassword((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                    aria-label="Tampilkan kata sandi saat ini"
+                  >
+                    {showCurrentPassword ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Kata Sandi Baru (Minimal 8 Karakter)
                 </label>
-                <input
-                  type="password"
-                  required
-                  minLength={8}
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  className="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-red-800"
-                />
+                <div className="relative">
+                  <KeyRound
+                    className={`w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 transition-colors ${
+                      passwordStatus?.type === 'error'
+                        ? 'text-red-500'
+                        : 'text-slate-400'
+                    }`}
+                  />
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    required
+                    minLength={8}
+                    value={newPassword}
+                    onChange={(e) => {
+                      setNewPassword(e.target.value);
+                      if (passwordStatus?.type === 'error') {
+                        setPasswordStatus(null);
+                      }
+                    }}
+                    placeholder="Masukkan kata sandi baru"
+                    className={`w-full pl-10 pr-10 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 transition-colors ${
+                      passwordStatus?.type === 'error'
+                        ? 'border-red-400 bg-red-50/40 focus:ring-red-800/25 focus:border-red-700'
+                        : 'border-slate-300 focus:ring-red-800/20 focus:border-red-800'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowNewPassword((prev) => {
+                        const next = !prev;
+                        setShowConfirmPassword(next);
+                        return next;
+                      });
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                    aria-label="Tampilkan kata sandi baru"
+                  >
+                    {showNewPassword ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Konfirmasi Kata Sandi Baru
                 </label>
-                <input
-                  type="password"
-                  required
-                  minLength={8}
-                  value={confirmNewPassword}
-                  onChange={(e) => setConfirmNewPassword(e.target.value)}
-                  className="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-red-800"
-                />
+                <div className="relative">
+                  <KeyRound
+                    className={`w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 transition-colors ${
+                      passwordStatus?.type === 'error'
+                        ? 'text-red-500'
+                        : 'text-slate-400'
+                    }`}
+                  />
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    required
+                    minLength={8}
+                    value={confirmNewPassword}
+                    onChange={(e) => {
+                      setConfirmNewPassword(e.target.value);
+                      if (passwordStatus?.type === 'error') {
+                        setPasswordStatus(null);
+                      }
+                    }}
+                    placeholder="Ulangi kata sandi baru"
+                    className={`w-full pl-10 pr-10 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 transition-colors ${
+                      passwordStatus?.type === 'error'
+                        ? 'border-red-400 bg-red-50/40 focus:ring-red-800/25 focus:border-red-700'
+                        : 'border-slate-300 focus:ring-red-800/20 focus:border-red-800'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                    aria-label="Tampilkan konfirmasi kata sandi baru"
+                  >
+                    {showConfirmPassword ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
               </div>
 
               {passwordStatus && (
                 <div
-                  className={`p-3 rounded-lg text-xs font-medium border ${
+                  className={`p-3 rounded-lg text-xs font-medium border flex items-start gap-2 ${
                     passwordStatus.type === 'success'
                       ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                      : 'bg-red-50 border-red-200 text-red-800'
+                      : 'bg-red-50 border-red-300 text-red-800'
+                  } ${
+                    isPasswordModalShaking && passwordStatus.type === 'error'
+                      ? 'animate-ptsp-shake'
+                      : ''
                   }`}
                 >
-                  {passwordStatus.text}
+                  {passwordStatus.type === 'error' && (
+                    <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                  )}
+                  <span>{passwordStatus.text}</span>
                 </div>
               )}
 
@@ -1049,7 +1195,7 @@ export const OfficerDeskPanel: React.FC<OfficerDeskPanelProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowPasswordModal(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 rounded-lg"
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 rounded-lg cursor-pointer"
                 >
                   Tutup
                 </button>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Lock, UserCheck, Eye, EyeOff, KeyRound, ShieldCheck, Loader2, AlertCircle } from 'lucide-react';
 import { BAWASLU_LOGO_DATA_URI } from '../assets/bawasluLogo';
+import { loginOfficer } from '../services/ptspCloudService';
 
 export interface AuthenticatedOfficer {
   id: string;
@@ -46,33 +47,13 @@ export const OfficerLoginGate: React.FC<OfficerLoginGateProps> = ({
     setIsSubmitting(true);
 
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          usernameOrNip: usernameOrNip.trim(),
-          password,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setErrorMsg(
-          data.error ||
-            'Autentikasi gagal. Periksa kembali ID Pengguna/NIP dan Kata Sandi Anda.'
-        );
-        triggerShake();
-        setIsSubmitting(false);
-        return;
-      }
-
-      onLoginSuccess(data.officer, data.token);
-    } catch {
+      const result = await loginOfficer(usernameOrNip, password);
+      onLoginSuccess(result.officer, result.token);
+    } catch (err) {
       setErrorMsg(
-        'Tidak dapat terhubung ke server autentikasi. Pastikan server berjalan dan coba kembali.'
+        err instanceof Error
+          ? err.message
+          : 'Autentikasi gagal. Periksa kembali ID Pengguna/NIP dan Kata Sandi Anda.'
       );
       triggerShake();
     } finally {

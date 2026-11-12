@@ -439,8 +439,11 @@ async function startServer() {
 
     const matchedOfficer = store.officers.find((acc) => {
       const cleanNip = acc.nipNik.replace(/\s+/g, '').toLowerCase();
+      const lowerUser = acc.username.toLowerCase();
       return (
-        acc.username.toLowerCase() === normalizedInput ||
+        lowerUser === normalizedInput ||
+        `${lowerUser}.ptsp` === normalizedInput ||
+        (lowerUser === 'ketua' && normalizedInput === 'koordinator.ptsp') ||
         cleanNip === normalizedInput
       );
     });
