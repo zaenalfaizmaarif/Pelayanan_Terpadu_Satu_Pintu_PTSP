@@ -15,6 +15,7 @@ import {
 import { PtspWorkspace } from './components/PtspWorkspace';
 import { PtspOfficialSheets } from './components/PtspOfficialSheets';
 import { ApplicationTrackerCard } from './components/ApplicationTrackerCard';
+import { PtspQrBarcodePanel } from './components/PtspQrBarcodePanel';
 import { BAWASLU_LOGO_DATA_URI } from './assets/bawasluLogo';
 import {
   verifyOfficerSession,
@@ -52,9 +53,10 @@ import {
   FileCheck,
   Activity,
   Loader2,
+  QrCode,
 } from 'lucide-react';
 
-type ActiveTab = 'form' | 'register' | 'officer' | 'template';
+type ActiveTab = 'form' | 'register' | 'officer' | 'template' | 'qr_barcode';
 
 const PTSP_STORAGE_KEY = 'bawaslu_subang_ptsp_records_v2';
 const PTSP_SURVEY_STORAGE_KEY = 'bawaslu_subang_ptsp_surveys_v1';
@@ -91,10 +93,19 @@ export default function App() {
     return INITIAL_PTSP_SURVEYS;
   });
 
-  // Applicant section state ('formulir_1', 'formulir_5', or 'lacak_status')
+  // Applicant section state ('formulir_1', 'formulir_5', 'lacak_status', or 'qr_barcode')
   const [applicantSection, setApplicantSection] = useState<
-    'formulir_1' | 'formulir_5' | 'lacak_status'
-  >('formulir_1');
+    'formulir_1' | 'formulir_5' | 'lacak_status' | 'qr_barcode'
+  >(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const layanan = (params.get('layanan') || '').toLowerCase();
+      if (layanan === 'survei' || layanan === 'skm') return 'formulir_5';
+      if (layanan === 'lacak' || layanan === 'status') return 'lacak_status';
+      if (layanan === 'barcode' || layanan === 'qr') return 'qr_barcode';
+    }
+    return 'formulir_1';
+  });
   const applicantFormCode: PtspFormCode =
     applicantSection === 'formulir_5' ? 'formulir_5' : 'formulir_1';
 
@@ -598,6 +609,33 @@ export default function App() {
                     <span className="truncate">Lacak Status Permohonan</span>
                   </span>
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigateWithAnimation('QR Code Akses Pelayanan', () => {
+                      setApplicantSection('qr_barcode');
+                      setActiveTab('form');
+                      syncPortalUrl('form');
+                    })
+                  }
+                  className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    activeTab === 'form' && applicantSection === 'qr_barcode'
+                      ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
+                      : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
+                  }`}
+                >
+                  <span className="flex items-center gap-2.5 truncate">
+                    <QrCode
+                      className={`w-4 h-4 shrink-0 ${
+                        activeTab === 'form' && applicantSection === 'qr_barcode'
+                          ? 'text-amber-300'
+                          : 'text-red-800/70'
+                      }`}
+                    />
+                    <span className="truncate">QR Code Akses Pelayanan</span>
+                  </span>
+                </button>
               </div>
             </div>
           ) : (
@@ -913,6 +951,42 @@ export default function App() {
                       <Lock className="w-3 h-3 text-slate-300 shrink-0" />
                     )}
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      navigateWithAnimation('QR Code / Barcode Pelayanan', () => {
+                        setActiveTab(
+                          authenticatedOfficer ? 'qr_barcode' : 'officer'
+                        );
+                        syncPortalUrl('officer');
+                      })
+                    }
+                    className={`w-full flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      Boolean(authenticatedOfficer) && activeTab === 'qr_barcode'
+                        ? 'bg-gradient-to-r from-[#7F1D1D] to-[#58111A] text-white shadow-xs'
+                        : !authenticatedOfficer
+                        ? 'text-slate-400 hover:bg-stone-50'
+                        : 'text-slate-700 hover:bg-red-50/60 hover:text-red-950'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2.5 truncate">
+                      <QrCode
+                        className={`w-4 h-4 shrink-0 ${
+                          Boolean(authenticatedOfficer) &&
+                          activeTab === 'qr_barcode'
+                            ? 'text-amber-300'
+                            : !authenticatedOfficer
+                            ? 'text-slate-400'
+                            : 'text-red-800/70'
+                        }`}
+                      />
+                      <span className="truncate">QR Code / Barcode PTSP</span>
+                    </span>
+                    {!authenticatedOfficer && (
+                      <Lock className="w-3 h-3 text-slate-300 shrink-0" />
+                    )}
+                  </button>
                 </div>
               </div>
             </div>
@@ -1054,6 +1128,8 @@ export default function App() {
                     })
                   }
                 />
+              ) : applicantSection === 'qr_barcode' ? (
+                <PtspQrBarcodePanel mode="applicant" />
               ) : (
                 <PtspWorkspace
                   records={ptspRecords}
@@ -1408,6 +1484,13 @@ export default function App() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* TAB 5: QR CODE / BARCODE AKSES PELAYANAN PTSP (MEJA PETUGAS) */}
+          {activeTab === 'qr_barcode' && (
+            <div key="qr-barcode-tab">
+              <PtspQrBarcodePanel mode="officer" />
             </div>
           )}
         </main>

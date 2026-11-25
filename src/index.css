@@ -117,6 +117,10 @@
     width: 100% !important;
     max-width: 100% !important;
   }
+  .print-exact-colors {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
   .print-page-break {
     page-break-after: always;
     break-after: page;
