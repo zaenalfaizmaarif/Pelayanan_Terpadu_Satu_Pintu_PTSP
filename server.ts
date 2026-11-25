@@ -41,6 +41,8 @@ interface StoreData {
   officers: StoredOfficerAccount[];
   ptspRecords: PtspRecord[];
   ptspSurveys: PtspSurveyEntry[];
+  recoveryCodeSalt?: string;
+  recoveryCodeHash?: string;
 }
 
 const DATA_DIR = path.join(__dirname, '.data');
@@ -97,6 +99,16 @@ function verifyPassword(
   return crypto.timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
+function timingSafeStringEqual(a: string, b: string): boolean {
+  const hashA = crypto.createHash('sha256').update(a).digest();
+  const hashB = crypto.createHash('sha256').update(b).digest();
+  return crypto.timingSafeEqual(hashA, hashB);
+}
+
+function getEnvRecoveryCode(): string {
+  return (process.env.PTSP_RECOVERY_CODE || '').trim();
+}
+
 function createInitialOfficers(): StoredOfficerAccount[] {
   const salt1 = crypto.randomBytes(16).toString('hex');
   const salt2 = crypto.randomBytes(16).toString('hex');
@@ -142,6 +154,14 @@ function loadStore(): StoreData {
           officers: parsed.officers,
           ptspRecords: parsed.ptspRecords,
           ptspSurveys: parsed.ptspSurveys,
+          recoveryCodeSalt:
+            typeof parsed.recoveryCodeSalt === 'string'
+              ? parsed.recoveryCodeSalt
+              : undefined,
+          recoveryCodeHash:
+            typeof parsed.recoveryCodeHash === 'string'
+              ? parsed.recoveryCodeHash
+              : undefined,
         };
       }
     }
@@ -164,6 +184,11 @@ function saveStore(data: StoreData): void {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
     fs.writeFileSync(STORE_PATH, JSON.stringify(data, null, 2), 'utf-8');
+    
+    // Sync officers to Supabase if config exists
+    if (isSupabaseConfigured()) {
+      data.officers.forEach(off => supabaseUpsertOfficer(off).catch(console.error));
+    }
   } catch (err) {
     console.error('Failed to write store:', err);
   }
@@ -296,15 +321,23 @@ async function supabaseFetchSurveys(): Promise<PtspSurveyEntry[] | null> {
 async function initSupabase(): Promise<void> {
   if (!isSupabaseConfigured()) return;
   try {
-    const [records, surveys] = await Promise.all([
+    const [records, surveys, officers] = await Promise.all([
       supabaseFetchRecords(),
       supabaseFetchSurveys(),
+      supabaseFetchOfficers(),
     ]);
     if (records) store.ptspRecords = records;
     if (surveys) store.ptspSurveys = surveys;
+    if (officers && officers.length > 0) {
+      store.officers = officers;
+    } else {
+      for (const off of store.officers) {
+        await supabaseUpsertOfficer(off);
+      }
+    }
     saveStore(store);
     console.log(
-      `[Supabase Cloud] Terhubung ke ${SUPABASE_URL} (${store.ptspRecords.length} berkas PTSP, ${store.ptspSurveys.length} survei SKM tersinkronisasi).`
+      `[Supabase Cloud] Terhubung ke ${SUPABASE_URL} (${store.ptspRecords.length} berkas, ${store.ptspSurveys.length} survei, ${store.officers.length} petugas tersinkronisasi).`
     );
   } catch (err) {
     console.error(
@@ -312,6 +345,31 @@ async function initSupabase(): Promise<void> {
       (err as Error)?.message || err
     );
   }
+}
+
+async function supabaseFetchOfficers(): Promise<StoredOfficerAccount[] | null> {
+  if (!isSupabaseConfigured()) return null;
+  const res = await fetch(
+    `${SUPABASE_URL}/rest/v1/ptsp_officers?select=*`,
+    {
+      headers: getSupabaseHeaders(),
+    }
+  );
+  if (!res.ok) return null;
+  const rows = (await res.json()) as StoredOfficerAccount[];
+  return rows;
+}
+
+async function supabaseUpsertOfficer(off: StoredOfficerAccount): Promise<void> {
+  if (!isSupabaseConfigured()) return;
+  await fetch(`${SUPABASE_URL}/rest/v1/ptsp_officers?on_conflict=id`, {
+    method: 'POST',
+    headers: getSupabaseHeaders({
+      'Content-Type': 'application/json',
+      Prefer: 'resolution=merge-duplicates,return=minimal',
+    }),
+    body: JSON.stringify(off),
+  });
 }
 
 // In-memory active cryptographic session tokens & rate-limiting tracker
@@ -324,6 +382,31 @@ const loginAttempts = new Map<
   string,
   { count: number; lockedUntil: number; lastAttempt: number }
 >();
+
+const resetAttempts = new Map<
+  string,
+  { count: number; lockedUntil: number; lastAttempt: number }
+>();
+
+function isRecoveryCodeConfigured(): boolean {
+  return Boolean(
+    getEnvRecoveryCode() ||
+      (store.recoveryCodeSalt && store.recoveryCodeHash)
+  );
+}
+
+function verifyRecoveryCode(inputCode: string): boolean {
+  const trimmed = inputCode.trim();
+  if (!trimmed) return false;
+  const envCode = getEnvRecoveryCode();
+  if (envCode) {
+    return timingSafeStringEqual(trimmed, envCode);
+  }
+  if (store.recoveryCodeSalt && store.recoveryCodeHash) {
+    return verifyPassword(trimmed, store.recoveryCodeSalt, store.recoveryCodeHash);
+  }
+  return false;
+}
 
 const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 const MAX_FAILED_ATTEMPTS = 5;
@@ -562,6 +645,180 @@ async function startServer() {
       });
     }
   );
+
+  app.get('/api/auth/recovery-status', (_req: Request, res: Response) => {
+    const envCode = getEnvRecoveryCode();
+    const configured = isRecoveryCodeConfigured();
+    res.json({
+      configured,
+      source: envCode
+        ? 'env'
+        : store.recoveryCodeHash
+        ? 'claimed'
+        : 'unconfigured',
+    });
+  });
+
+  app.post('/api/auth/setup-recovery-code', (req: Request, res: Response) => {
+    if (isRecoveryCodeConfigured()) {
+      res.status(409).json({
+        error:
+          'Kode Pemulihan Admin sudah aktif di server dan terkunci demi keamanan.',
+      });
+      return;
+    }
+
+    const { recoveryCode } = req.body as { recoveryCode?: string };
+    const trimmed = String(recoveryCode || '').trim();
+    if (trimmed.length < 6) {
+      res.status(400).json({
+        error: 'Kode Pemulihan Admin minimal harus terdiri dari 6 karakter.',
+      });
+      return;
+    }
+
+    const salt = crypto.randomBytes(16).toString('hex');
+    store.recoveryCodeSalt = salt;
+    store.recoveryCodeHash = hashPassword(trimmed, salt);
+    saveStore(store);
+
+    res.status(201).json({
+      success: true,
+      message:
+        'Kode Pemulihan Admin berhasil diaktifkan secara terenkripsi. Simpan kode ini dengan aman.',
+    });
+  });
+
+  app.post('/api/auth/reset-password', (req: Request, res: Response) => {
+    const { usernameOrNip, nipVerification, recoveryCode, newPassword } =
+      req.body as {
+        usernameOrNip?: string;
+        nipVerification?: string;
+        recoveryCode?: string;
+        newPassword?: string;
+      };
+
+    const clientIp =
+      (req.headers['x-forwarded-for'] as string) ||
+      req.socket.remoteAddress ||
+      'local';
+    const normalizedInput = String(usernameOrNip || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '');
+    const normalizedNip = String(nipVerification || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '');
+    const attemptKey = `reset:${clientIp}:${normalizedInput || 'unknown'}`;
+
+    const attemptRecord = resetAttempts.get(attemptKey);
+    const now = Date.now();
+
+    if (attemptRecord && attemptRecord.lockedUntil > now) {
+      const waitSeconds = Math.ceil((attemptRecord.lockedUntil - now) / 1000);
+      res.status(429).json({
+        error: `Terlalu banyak percobaan reset gagal. Silakan coba kembali dalam ${waitSeconds} detik.`,
+      });
+      return;
+    }
+
+    if (!isRecoveryCodeConfigured()) {
+      res.status(400).json({
+        error:
+          'Kode Pemulihan Admin belum diaktifkan. Silakan aktifkan Kode Pemulihan Admin terlebih dahulu.',
+      });
+      return;
+    }
+
+    if (
+      !normalizedInput ||
+      !normalizedNip ||
+      !recoveryCode ||
+      !newPassword
+    ) {
+      res.status(400).json({
+        error:
+          'ID Pengguna, NIP Petugas, Kode Pemulihan Admin, dan Kata Sandi Baru wajib diisi.',
+      });
+      return;
+    }
+
+    if (String(newPassword).length < 8) {
+      res.status(400).json({
+        error: 'Kata sandi baru minimal harus terdiri dari 8 karakter.',
+      });
+      return;
+    }
+
+    const matchedOfficer = store.officers.find((acc) => {
+      const cleanNip = acc.nipNik.replace(/\s+/g, '').toLowerCase();
+      const lowerUser = acc.username.toLowerCase();
+      return (
+        lowerUser === normalizedInput ||
+        `${lowerUser}.ptsp` === normalizedInput ||
+        (lowerUser === 'ketua' && normalizedInput === 'koordinator.ptsp') ||
+        cleanNip === normalizedInput
+      );
+    });
+
+    const isNipMatched = Boolean(
+      matchedOfficer &&
+        timingSafeStringEqual(
+          normalizedNip,
+          matchedOfficer.nipNik.replace(/\s+/g, '').toLowerCase()
+        )
+    );
+    const isCodeValid = verifyRecoveryCode(String(recoveryCode));
+
+    if (!matchedOfficer || !isNipMatched || !isCodeValid) {
+      const prevCount =
+        attemptRecord && now - attemptRecord.lastAttempt < 10 * 60 * 1000
+          ? attemptRecord.count
+          : 0;
+      const nextCount = prevCount + 1;
+      const lockedUntil =
+        nextCount >= MAX_FAILED_ATTEMPTS ? now + LOCKOUT_DURATION_MS : 0;
+
+      resetAttempts.set(attemptKey, {
+        count: nextCount,
+        lockedUntil,
+        lastAttempt: now,
+      });
+
+      const remainingAttempts = Math.max(0, MAX_FAILED_ATTEMPTS - nextCount);
+      res.status(401).json({
+        error:
+          remainingAttempts > 0
+            ? `Verifikasi gagal. Pastikan ID Pengguna, NIP Petugas, dan Kode Pemulihan Admin benar. Sisa percobaan: ${remainingAttempts} kali.`
+            : 'Terlalu banyak percobaan reset gagal. Akses reset dikunci selama 5 menit.',
+      });
+      return;
+    }
+
+    resetAttempts.delete(attemptKey);
+    loginAttempts.delete(`${clientIp}:${normalizedInput}`);
+    loginAttempts.delete(`${clientIp}:${matchedOfficer.username.toLowerCase()}`);
+
+    const newSalt = crypto.randomBytes(16).toString('hex');
+    matchedOfficer.salt = newSalt;
+    matchedOfficer.passwordHash = hashPassword(String(newPassword), newSalt);
+    saveStore(store);
+
+    // Revoke existing sessions for this officer so old tokens cannot be reused
+    for (const [token, session] of activeSessions.entries()) {
+      if (session.officerId === matchedOfficer.id) {
+        activeSessions.delete(token);
+      }
+    }
+
+    res.json({
+      success: true,
+      username: matchedOfficer.username,
+      officerName: matchedOfficer.fullName,
+      message: `Kata sandi untuk ${matchedOfficer.fullName} berhasil direset. Silakan masuk menggunakan kata sandi baru Anda.`,
+    });
+  });
 
   // --- PTSP RECORDS & SURVEYS API ROUTES (SUPABASE CLOUD -> LOCAL JSON FALLBACK) ---
 

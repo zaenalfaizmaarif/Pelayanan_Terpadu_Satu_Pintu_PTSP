@@ -232,6 +232,214 @@ export async function changeOfficerPassword(
   return 'Kata sandi petugas berhasil diperbarui.';
 }
 
+const CLIENT_RECOVERY_HASH_KEY = 'bawaslu_subang_ptsp_recovery_hash_v1';
+
+async function sha256Hex(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function getLocalRecoveryRecord(): { salt: string; hash: string } | null {
+  try {
+    const raw = localStorage.getItem(CLIENT_RECOVERY_HASH_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<{ salt: string; hash: string }>;
+    if (typeof parsed.salt === 'string' && typeof parsed.hash === 'string') {
+      return { salt: parsed.salt, hash: parsed.hash };
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+export interface RecoveryStatusResult {
+  configured: boolean;
+  source: 'env' | 'claimed' | 'unconfigured';
+}
+
+export async function getRecoveryStatus(): Promise<RecoveryStatusResult> {
+  try {
+    const res = await fetch('/api/auth/recovery-status');
+    const contentType = res.headers.get('content-type') || '';
+    if (res.ok && contentType.includes('application/json')) {
+      const data = (await res.json()) as RecoveryStatusResult;
+      if (typeof data.configured === 'boolean') {
+        return data;
+      }
+    }
+  } catch {
+    // Fallback to local static mode (Vercel)
+  }
+
+  const localRec = getLocalRecoveryRecord();
+  return {
+    configured: Boolean(localRec),
+    source: localRec ? 'claimed' : 'unconfigured',
+  };
+}
+
+export async function setupRecoveryCode(recoveryCode: string): Promise<string> {
+  const trimmed = recoveryCode.trim();
+  if (trimmed.length < 6) {
+    throw new Error('Kode Pemulihan Admin minimal harus terdiri dari 6 karakter.');
+  }
+
+  let handledByServer = false;
+  try {
+    const res = await fetch('/api/auth/setup-recovery-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recoveryCode: trimmed }),
+    });
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      handledByServer = true;
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(
+          data.error || 'Gagal mengaktifkan Kode Pemulihan Admin.'
+        );
+      }
+      return (
+        data.message ||
+        'Kode Pemulihan Admin berhasil diaktifkan secara terenkripsi.'
+      );
+    }
+  } catch (err) {
+    if (handledByServer) throw err;
+    // Fall through to Vercel static client-side hashed storage
+  }
+
+  if (getLocalRecoveryRecord()) {
+    throw new Error('Kode Pemulihan Admin sudah aktif dan terkunci.');
+  }
+
+  const saltBytes = new Uint8Array(16);
+  crypto.getRandomValues(saltBytes);
+  const salt = Array.from(saltBytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  const hash = await sha256Hex(`${salt}:${trimmed}`);
+
+  try {
+    localStorage.setItem(
+      CLIENT_RECOVERY_HASH_KEY,
+      JSON.stringify({ salt, hash })
+    );
+  } catch {
+    throw new Error('Gagal menyimpan Kode Pemulihan Admin pada browser.');
+  }
+
+  return 'Kode Pemulihan Admin berhasil diaktifkan. Simpan kode ini dengan aman.';
+}
+
+export async function resetOfficerPassword(params: {
+  usernameOrNip: string;
+  nipVerification: string;
+  recoveryCode: string;
+  newPassword: string;
+}): Promise<{ username: string; officerName: string; message: string }> {
+  const { usernameOrNip, nipVerification, recoveryCode, newPassword } = params;
+
+  if (!usernameOrNip.trim() || !nipVerification.trim() || !recoveryCode.trim()) {
+    throw new Error(
+      'ID Pengguna, NIP Petugas, dan Kode Pemulihan Admin wajib diisi.'
+    );
+  }
+  if (newPassword.length < 8) {
+    throw new Error('Kata sandi baru minimal harus terdiri dari 8 karakter.');
+  }
+
+  let handledByServer = false;
+  try {
+    const res = await fetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        usernameOrNip: usernameOrNip.trim(),
+        nipVerification: nipVerification.trim(),
+        recoveryCode: recoveryCode.trim(),
+        newPassword,
+      }),
+    });
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      handledByServer = true;
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(
+          data.error ||
+            'Verifikasi gagal. Periksa kembali ID Pengguna, NIP Petugas, dan Kode Pemulihan Admin.'
+        );
+      }
+      return {
+        username: data.username || usernameOrNip.trim(),
+        officerName: data.officerName || usernameOrNip.trim(),
+        message:
+          data.message ||
+          'Kata sandi petugas berhasil direset. Silakan masuk menggunakan kata sandi baru.',
+      };
+    }
+  } catch (err) {
+    if (handledByServer) throw err;
+    // Fall through to Vercel static fallback
+  }
+
+  const localRecovery = getLocalRecoveryRecord();
+  if (!localRecovery) {
+    throw new Error(
+      'Kode Pemulihan Admin belum diaktifkan. Silakan aktifkan terlebih dahulu.'
+    );
+  }
+
+  const normalizedInput = usernameOrNip
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '');
+  const normalizedNip = nipVerification
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '');
+
+  const matched = FALLBACK_OFFICERS.find((acc) =>
+    acc.aliases.includes(normalizedInput)
+  );
+  const expectedNip = matched
+    ? matched.nipNik.replace(/\s+/g, '').toLowerCase()
+    : '';
+  const inputRecoveryHash = await sha256Hex(
+    `${localRecovery.salt}:${recoveryCode.trim()}`
+  );
+
+  if (
+    !matched ||
+    normalizedNip !== expectedNip ||
+    inputRecoveryHash !== localRecovery.hash
+  ) {
+    throw new Error(
+      'Verifikasi gagal. Pastikan ID Pengguna, NIP Petugas, dan Kode Pemulihan Admin benar.'
+    );
+  }
+
+  try {
+    const custom = getStoredOfficerPasswords();
+    custom[matched.id] = newPassword;
+    localStorage.setItem(CLIENT_CUSTOM_PASSWORDS_KEY, JSON.stringify(custom));
+  } catch {
+    throw new Error('Gagal menyimpan kata sandi baru.');
+  }
+
+  return {
+    username: matched.username,
+    officerName: matched.fullName,
+    message: `Kata sandi untuk ${matched.fullName} berhasil direset. Silakan masuk menggunakan kata sandi baru Anda.`,
+  };
+}
+
 export async function verifyOfficerSession(
   token: string
 ): Promise<AuthenticatedOfficer | null> {
